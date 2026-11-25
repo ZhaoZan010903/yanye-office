@@ -1,0 +1,43 @@
+{
+  "name": "yanye",
+  "productName": "砚页",
+  "version": "0.1.0",
+  "author": "YanYe Team",
+  "license": "MIT",
+  "description": "YanYe 砚页，面向 Windows 的开源集成办公协作软件",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.mjs",
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "start": "pnpm build && electron .",
+    "package:win": "pnpm build && node scripts/package-win.mjs",
+    "test": "node --test test/workspace.test.mjs",
+    "test:desktop": "pnpm build && node test/desktop.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.35.0",
+    "@tiptap/extension-image": "3.35.0",
+    "@tiptap/extension-placeholder": "3.35.0",
+    "@tiptap/extension-table": "3.35.0",
+    "@tiptap/extension-task-item": "3.35.0",
+    "@tiptap/extension-task-list": "3.35.0",
+    "@tiptap/markdown": "3.35.0",
+    "@tiptap/pm": "3.35.0",
+    "@tiptap/react": "3.35.0",
+    "@tiptap/starter-kit": "3.35.0",
+    "@tiptap/suggestion": "3.35.0",
+    "lucide-react": "1.79.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.5.0",
+    "playwright": "1.65.1",
+    "vite": "8.3.8"
+  }
+}

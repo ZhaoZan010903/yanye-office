@@ -208,7 +208,8 @@ export function DocumentEditor({
       const lineHeight = parseFloat(getComputedStyle(input).lineHeight)
       input.scrollTop = Math.max(0, (heading.line - 2) * lineHeight)
     } else {
-      editor?.view.nodeDOM(heading.position)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      editor?.view.nodeDOM(heading.position)?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' })
     }
   }
 

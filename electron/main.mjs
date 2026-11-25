@@ -181,11 +181,11 @@ function createWindow() {
     height: 900,
     minWidth: 760,
     minHeight: 530,
-    backgroundColor: '#f8f6ee',
+    backgroundColor: '#f7f6f3',
     icon: join(directory, 'assets', 'yanye.png'),
     show: false,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#f8f6ee', symbolColor: '#34483a', height: 43 },
+    titleBarOverlay: { color: '#f7f6f3', symbolColor: '#37352f', height: 42 },
     webPreferences: {
       preload: join(directory, 'electron', 'preload.cjs'),
       contextIsolation: true,

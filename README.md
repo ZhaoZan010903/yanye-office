@@ -1,14 +1,16 @@
-# 砚页
+# 砚页 YanYe
 
 砚页 YanYe 是一款面向 Windows 的开源集成办公协作软件。它从 Typora 的连续 Markdown 写作出发，加入 Notion 的页面化组织能力，并计划把文档、电子表格、多维表格、流程图、白板、演示文稿和实时协作放进同一个工作区。
 
-当前仓库提供第一阶段的 Markdown 与页面工作区 MVP。更完整的产品边界、模块规划和同步架构写在 [产品设计说明](docs/PRODUCT_SPEC.md) 与 [技术架构说明](docs/ARCHITECTURE.md) 中。
+当前可运行版本是 Windows x64 本地 Markdown 工作区。团队可以从这里查看各阶段的功能、交互和验收条件。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md) · [MIT 许可证](LICENSE)
+
+![砚页的 Windows 编辑器，左侧为页面树，中间为正文，右侧为大纲及任务进度](docs/workspace.png)
 
 ## 产品取舍
 
 - Typora 的部分聚焦于 Markdown 双向编辑、富文本和源码模式切换、快捷键写作、代码块、表格与任务清单。
 - Notion 的部分聚焦于页面树、子页面、收藏、全文搜索、回收站、页面移动、页面目录和任务进度。
-- 砚页使用独立的深松绿色与纸张色视觉系统，页面内容保持宽阔留白，右侧上下文栏承载目录和关联页面。
+- 米纸色侧栏放页面树，白色正文区用于编辑，右侧显示大纲、子页和待办进度。
 - 数据默认保存在本机，保存过程使用临时文件写入后替换，应用关闭前会等待最后一次保存完成。
 
 ## 已实现能力
@@ -21,7 +23,7 @@
 - Markdown 导入与导出
 - 右侧页面目录、子页面列表和任务完成进度
 - `Ctrl+K` 搜索、`Ctrl+N` 新建页面、`Ctrl+S` 立即保存
-- Electron 安全配置，包含自定义协议、上下文隔离、禁用 Node 集成、内容安全策略和外链确认
+- Electron 桌面窗口使用上下文隔离。按 Ctrl 单击文档中的 HTTP 或 HTTPS 链接可在系统浏览器打开。
 
 ## 集成办公产品路线
 
@@ -38,10 +40,12 @@
 
 ## 开发运行
 
-在 `D:\Project\REA\yanye` 目录执行以下命令。
+在 Windows 上准备 Node.js 24 和 pnpm 11.25.0，然后运行以下命令。
 
 ```powershell
-pnpm install
+git clone https://github.com/ZhaoZan010903/yanye-office.git
+cd yanye-office
+pnpm install --frozen-lockfile
 pnpm start
 ```
 

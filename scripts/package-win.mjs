@@ -13,8 +13,9 @@ try {
   for (const directory of ['dist', 'electron', 'shared', 'assets']) {
     await cp(join(root, directory), join(staging, directory), { recursive: true })
   }
-  const { name, version, author, productName, description, type, main } = pkg
-  await writeFile(join(staging, 'package.json'), JSON.stringify({ name, version, author, productName, description, type, main }))
+  await cp(join(root, 'LICENSE'), join(staging, 'LICENSE'))
+  const { name, version, author, license, productName, description, type, main } = pkg
+  await writeFile(join(staging, 'package.json'), JSON.stringify({ name, version, author, license, productName, description, type, main }))
   const paths = await packager({
     dir: staging,
     out: release,

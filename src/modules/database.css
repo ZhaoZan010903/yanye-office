@@ -1,0 +1,40 @@
+.base-editor { flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; color:var(--color-ink); }
+.base-tabs,.base-tools,.base-month,.base-form-actions,.base-math { display:flex; align-items:center; gap:8px; }
+.base-tabs,.base-tools { flex-wrap:wrap; padding:7px 16px; border-bottom:1px solid var(--color-hairline); }
+.base-tabs button,.base-tools button,.base-data button,.base-feedback button,.base-form-actions button { display:inline-flex; align-items:center; justify-content:center; gap:6px; background:transparent; border:0; border-radius:4px; padding:5px 8px; color:inherit; }
+.base-editor button:hover,.base-editor button[aria-pressed=true],.base-form-actions button:hover { background:var(--color-hover-grey); }
+.base-editor button[aria-pressed=true] { font-weight:600; }
+.base-total,.base-card small,.base-grid small,.base-blank { color:var(--muted); font-size:12px; }
+.base-total { margin-left:auto; }
+.base-tools label { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
+.base-tools select,.base-tools input,.base-math select { font:inherit; color:var(--color-ink); background:#fff; border:1px solid var(--color-hairline); border-radius:4px; padding:4px; max-width:180px; }
+.base-tools .base-search input { width:120px; }
+.base-data { flex:1; overflow:auto; min-height:0; padding:0 16px 16px; }
+.base-grid { border-collapse:separate; border-spacing:0; margin-top:12px; width:max-content; min-width:100%; }
+.base-grid :is(th,td) { font-weight:400; padding:0; text-align:left; border-bottom:1px solid var(--color-hairline); border-right:1px solid var(--color-hairline); }
+.base-grid th { background:var(--color-paper); position:sticky; top:0; z-index:1; }
+.base-grid th:first-child,.base-grid td:first-child { text-align:center; padding:0 7px; width:42px; color:var(--muted); }
+.base-grid th button { width:100%; justify-content:space-between; font-weight:500; }
+.base-grid td :is(input:not([type=checkbox]),select,output) { box-sizing:border-box; display:block; width:100%; min-width:134px; height:33px; padding:5px 8px; border:1px solid transparent; background:transparent; font:inherit; }
+.base-grid td input[type=checkbox] { margin:8px; }
+.base-grid td :focus-visible,.base-form :is(input,select,textarea):focus-visible { outline:1px solid var(--color-ink); outline-offset:-1px; }
+.base-blank { margin:24px 8px; }
+.base-form { display:grid; gap:12px; max-height:65vh; overflow:auto; padding:3px; }
+.base-form label { display:grid; gap:4px; font-size:13px; }
+.base-form label :is(input:not([type=checkbox]),select,textarea) { width:100%; box-sizing:border-box; color:inherit; border:1px solid var(--color-hairline); border-radius:4px; background:#fff; font:inherit; padding:7px 9px; }
+.base-form label input[type=checkbox] { justify-self:start; }
+.base-form-actions { justify-content:flex-end; margin-top:8px; }
+.base-form-actions .button.primary { background:var(--color-ink); color:white; }
+.base-board { display:flex; gap:14px; padding:16px 0; align-items:flex-start; }
+.base-board section { min-width:175px; width:220px; flex:1 0 175px; background:var(--color-paper); border-radius:4px; padding:8px; min-height:140px; }
+.base-board header { display:flex; align-items:center; justify-content:space-between; margin:0 0 8px; }
+.base-data .base-card { display:block; text-align:left; width:100%; border:1px solid var(--color-hairline); padding:8px; margin-bottom:5px; background:white; white-space:normal; overflow-wrap:anywhere; }
+.base-month { padding:10px 0; }
+.base-calendar { display:grid; grid-template-columns:repeat(7,minmax(68px,1fr)); min-width:476px; }
+.base-calendar > * { border:1px solid var(--color-hairline); border-width:0 1px 1px 0; padding:4px; min-height:72px; }
+.base-calendar > b { text-align:center; min-height:0; background:var(--color-paper); font-weight:500; }
+.base-day > button:first-child { color:var(--muted); padding:2px 5px; }
+.base-day .base-card { font-size:12px; padding:3px 4px; }
+.base-unscheduled { padding-top:16px; max-width:380px; }
+.base-unscheduled strong { display:block; margin-bottom:8px; }
+.base-feedback { margin:0; padding:6px 16px; background:var(--color-paper); }

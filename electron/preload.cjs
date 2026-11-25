@@ -7,6 +7,9 @@ function listen(channel, handler) {
 }
 
 contextBridge.exposeInMainWorld('yanye', {
+  importFile: extension => ipcRenderer.invoke('office:import', extension),
+  printPdf: name => ipcRenderer.invoke('office:print-pdf', name),
+  exportFile: (filename, content) => ipcRenderer.invoke('office:export', filename, content),
   load: () => ipcRenderer.invoke('workspace:load'),
   stage: snapshot => ipcRenderer.send('workspace:stage', snapshot),
   save: snapshot => ipcRenderer.invoke('workspace:flush', snapshot),

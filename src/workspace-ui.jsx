@@ -1,11 +1,12 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   Archive, BookOpen, ChevronDown, ChevronRight, CirclePlus, File, FileText, FolderInput, FolderOpen,
-  Inbox, Library, MoreHorizontal, NotebookPen, Plus, Search, Star, Trash2, X,
+  Inbox, Library, MoreHorizontal, NotebookPen, Plus, Search, Star, Trash2, X, Sheet, Database, Workflow, Presentation,
 } from 'lucide-react'
 import { ancestors, pageTitle } from '../shared/workspace.mjs'
 
-const pageIcons = { desk: NotebookPen, journal: FileText, book: BookOpen, inbox: Inbox, collection: Library, note: File }
+const pageIcons = { desk: NotebookPen, journal: FileText, book: BookOpen, inbox: Inbox, collection: Library, note: File,
+  spreadsheet: Sheet, database: Database, canvas: Workflow, presentation: Presentation }
 
 export function PageIcon({ page, size = 16 }) {
   const Icon = pageIcons[page?.kind] ?? File
@@ -125,13 +126,28 @@ export function Dialog({ title, onClose, children, className = '' }) {
   </dialog>
 }
 
+const searchIndices = new WeakMap()
+function pageContents(page) {
+  if (!page.content) return page.markdown.toLocaleLowerCase()
+  if (!searchIndices.has(page.content)) {
+    const terms = []
+    function collect(value) {
+      if (typeof value === 'string' && value.length <= 32767 && !value.startsWith('data:image/')) terms.push(value)
+      else if (value && typeof value === 'object') Object.values(value).forEach(collect)
+    }
+    collect(page.content)
+    searchIndices.set(page.content, terms.join(' ').toLocaleLowerCase())
+  }
+  return searchIndices.get(page.content)
+}
+
 function searchPages(pages, query) {
   const terms = query.toLocaleLowerCase().trim().split(/\s+/u).filter(Boolean)
   if (!terms.length) return [...pages].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 12)
 
   return pages.map(page => {
     const title = pageTitle(page).toLocaleLowerCase()
-    const body = page.markdown.toLocaleLowerCase()
+    const body = pageContents(page)
     const score = terms.reduce((rank, term) => {
       if (rank < 0) return rank
       if (title.startsWith(term)) return rank + 5

@@ -91,11 +91,15 @@ function handle(channel, callback) {
   })
 }
 
-function markdownFilename(title) {
+function safeFilename(title, extension = 'md') {
   const base = title.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').trim().replace(/[. ]+$/u, '') || '未命名页面'
   const prefix = /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(base) ? '_' : ''
-  return `${prefix}${base}.md`
+  return `${prefix}${base}.${extension}`
 }
+
+const exchangeTypes = new Set(['csv', 'xlsx', 'json', 'svg', 'png', 'jpeg', 'jpg', 'pptx', 'pdf', 'mmd'])
+const binaryTypes = new Set(['xlsx', 'pptx', 'png', 'jpeg', 'jpg', 'pdf'])
+const maxFileBytes = 32 * 1024 * 1024
 
 function registerHandlers() {
   handle('workspace:load', async () => ({ workspace: await store.load(), directory: dirname(store.filename) }))
@@ -117,6 +121,46 @@ function registerHandlers() {
   })
   handle('workspace:finish-close', finishClose)
   handle('workspace:open-folder', () => shell.openPath(dirname(store.filename)))
+
+  handle('office:print-pdf', async name => {
+    if (typeof name !== 'string') throw new Error('演示文稿名称无效。')
+    const result = await dialog.showSaveDialog(window, { title: '导出 PDF',
+      defaultPath: safeFilename(basename(name, '.pdf').slice(0, 120), 'pdf'),
+      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }] })
+    if (result.canceled || !result.filePath) return false
+    const bytes = await window.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true })
+    await writeAtomically(result.filePath, bytes)
+    return true
+  })
+
+  handle('office:import', async extension => {
+    if (!exchangeTypes.has(extension)) throw new Error('不支持此文件格式。')
+    const result = await dialog.showOpenDialog(window, { title: '打开本地文件', properties: ['openFile'],
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }] })
+    if (result.canceled || !result.filePaths.length) return null
+    const file = result.filePaths[0]
+    const info = await stat(file)
+    if (!info.isFile() || extname(file).toLowerCase() !== '.' + extension) throw new Error('文件扩展名与所选格式不匹配。')
+    if (info.size > maxFileBytes) throw new Error('文件超过 32 MiB 导入上限。')
+    const data = await readFile(file)
+    return { name: basename(file), text: binaryTypes.has(extension) ? data.toString('base64') : new TextDecoder('utf-8', { fatal: true }).decode(data) }
+  })
+
+  handle('office:export', async (name, content) => {
+    if (typeof name !== 'string' || typeof content !== 'string') throw new Error('导出内容无效。')
+    const suffix = extname(name)
+    const extension = suffix.slice(1).toLowerCase()
+    if (!exchangeTypes.has(extension)) throw new Error('不支持此导出格式。')
+    if (content.length > Math.ceil(maxFileBytes / 3) * 4) throw new Error('文件超过 32 MiB 导出上限。')
+    const data = Buffer.from(content, binaryTypes.has(extension) ? 'base64' : 'utf8')
+    if (data.length > maxFileBytes) throw new Error('文件超过 32 MiB 导出上限。')
+    const result = await dialog.showSaveDialog(window, { title: '导出本地文件',
+      defaultPath: safeFilename(basename(name, suffix).slice(0, 120), extension),
+      filters: [{ name: extension.toUpperCase(), extensions: [extension] }] })
+    if (result.canceled || !result.filePath) return false
+    await writeAtomically(result.filePath, data)
+    return true
+  })
 
   handle('markdown:import', async () => {
     const result = await dialog.showOpenDialog(window, {
@@ -141,7 +185,7 @@ function registerHandlers() {
     }
     const result = await dialog.showSaveDialog(window, {
       title: '导出 Markdown',
-      defaultPath: markdownFilename(title),
+      defaultPath: safeFilename(title),
       filters: [{ name: 'Markdown 文档', extensions: ['md'] }],
     })
     if (result.canceled || !result.filePath) return false

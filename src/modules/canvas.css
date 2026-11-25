@@ -1,0 +1,27 @@
+.yy-canvas { flex: 1; min-width: 0; min-height: 180px; display: flex; flex-direction: column; background: white; }
+.yy-canvas button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 30px; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--color-ink); }
+.yy-canvas button:hover:not(:disabled), .yy-canvas button[aria-pressed="true"] { background: var(--color-hover-grey); }
+.yy-canvas button[aria-pressed="true"] { color: #245974; }
+.yy-canvas-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; position: relative; padding: 6px 12px; border-bottom: 1px solid var(--color-hairline); background: var(--color-paper); }
+.yy-canvas-divider { height: 16px; width: 1px; margin: 0 4px; background: var(--color-hairline); }
+.yy-canvas-space { flex: 1; }
+.yy-canvas-files { display: grid; position: absolute; right: 10px; top: calc(100% + 2px); z-index: 5; padding: 4px; border: 1px solid var(--color-hairline); border-radius: 4px; box-shadow: 0 8px 24px #0f0f0f1f; background: white; }
+.yy-canvas-files button { justify-content: flex-start; }
+.yy-canvas-templates { right: 72px; }
+.yy-canvas-surface { flex: 1; min-height: 100px; position: relative; overflow: hidden; }
+.yy-canvas-stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
+.yy-canvas-stage:focus-visible { outline: 1px solid var(--muted); outline-offset: -2px; }
+.yy-canvas-tool-line, .yy-canvas-tool-pen, .yy-canvas-tool-text, .yy-canvas-tool-note, .yy-canvas-tool-process, .yy-canvas-tool-decision, .yy-canvas-tool-terminal { cursor: crosshair; }
+.yy-canvas-tool-pan, .yy-canvas-tool-select [data-node] { cursor: grab; }
+.yy-canvas-tool-pan:active, .yy-canvas-tool-select [data-node]:active { cursor: grabbing; }
+.yy-canvas-stage [data-selected-edge] [marker-end], .yy-canvas-stage [data-selected-ink] polyline:last-child { stroke: #2e7795; }
+.yy-canvas-stage [data-selected-ink] circle { fill: #2e7795; }
+.yy-canvas-empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; color: var(--muted); pointer-events: none; }
+.yy-canvas-empty button { pointer-events: auto; background: var(--color-paper); border: 1px solid var(--color-hairline); }
+.yy-canvas-zoom { display: flex; align-items: center; gap: 2px; position: absolute; right: 12px; bottom: 12px; border: 1px solid var(--color-hairline); background: white; border-radius: 4px; }
+.yy-canvas-zoom span { min-width: 35px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.yy-canvas-props { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 6px 12px; border-top: 1px solid var(--color-hairline); }
+.yy-canvas-props label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.yy-canvas-props input, .yy-canvas-props select { font: inherit; color: var(--color-ink); background: white; border: 1px solid var(--color-hairline); border-radius: 4px; padding: 4px 6px; max-width: 145px; }
+.yy-canvas-props input[type="number"] { width: 62px; }
+.yy-canvas-status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; min-height: 26px; padding: 4px 12px; border-top: 1px solid var(--color-hairline); color: var(--muted); font-size: 12px; background: var(--color-paper); }

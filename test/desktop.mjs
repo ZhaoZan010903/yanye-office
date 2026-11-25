@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { _electron } from 'playwright'
+import { exerciseOffice, verifyOfficeRestart } from './office-desktop.mjs'
 
 const root = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const exe = process.argv[2] ? resolve(process.argv[2]) : createRequire(import.meta.url)('electron')
@@ -17,6 +18,7 @@ let application
 async function start() {
   application = await _electron.launch({ executablePath: exe, args, env: { ...process.env, YANYE_PROFILE: profile }, timeout: 22_000 })
   const page = await application.firstWindow({ timeout: 12_000 })
+  await page.context().setOffline(true)
   page.setDefaultTimeout(7_000)
   page.on('pageerror', error => appErrors.push(error.message))
   await page.getByRole('textbox', { name: '页面标题' }).waitFor()
@@ -113,9 +115,13 @@ try {
   page = await start()
   assert.equal(await title().inputValue(), '导入样本')
   await body().getByRole('heading', { name: '关闭前的编辑' }).waitFor()
+  await exerciseOffice(page, application, temp)
+  await close()
+  page = await start()
+  await verifyOfficeRestart(page)
   assert.deepEqual(appErrors, [])
   await close()
-  console.log('桌面验证通过：Markdown 双向编辑、块命令、待办、表格、全文搜索、页面移动与恢复、导入导出、关窗保存和重启。')
+  console.log('Windows 离线验证通过。Markdown、四类办公页面、共享记录视图、文件交换、PDF 分页、放映及关窗重启均已验证。')
 } finally {
   if (application) await application.close().catch(() => {})
   if (dirname(temp) === tmpdir() && basename(temp).startsWith('yanye-desktop-')) {

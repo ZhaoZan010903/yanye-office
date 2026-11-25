@@ -1,0 +1,9 @@
+.office-page { min-width:0; min-height:0; flex:1; display:flex; flex-direction:column; background:#fff; }
+.office-heading { display:flex; gap:10px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--color-hairline); }
+.office-heading > svg { color:var(--muted); }
+.office-heading input { font-size:20px; line-height:1.4; font-weight:600; min-width:0; flex:1; border:0; border-bottom:1px solid transparent; outline:0; }
+.office-heading input:focus-visible { border-bottom-color:var(--color-hairline); }
+.office-editor { min-height:0; min-width:0; flex:1; overflow:auto; display:flex; flex-direction:column; }
+.office-editor > p[role=status] { padding:24px; color:var(--muted); }
+.office-recovery { max-width: 708px; padding: 24px; }
+.office-recovery h2 { font-size: 20px; }

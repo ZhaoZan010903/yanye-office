@@ -3,7 +3,25 @@ export const MAX_MARKDOWN_LENGTH = 2_000_000
 export const MAX_PAGES = 2_000
 export const MAX_WORKSPACE_BYTES = 24 * 1024 * 1024
 
-const pageKinds = new Set(['note', 'desk', 'journal', 'book', 'inbox', 'collection'])
+export const officeKinds = Object.freeze({
+  spreadsheet: '电子表格',
+  database: '多维表格',
+  canvas: '流程图与白板',
+  presentation: '演示文稿',
+})
+const pageKinds = new Set(['note', 'desk', 'journal', 'book', 'inbox', 'collection', ...Object.keys(officeKinds)])
+
+const pageSizes = new WeakMap()
+const encoder = new TextEncoder()
+
+export function workspaceBytes(workspace) {
+  let bytes = encoder.encode(JSON.stringify({ ...workspace, pages: [] })).length + Math.max(0, workspace.pages.length - 1)
+  for (const page of workspace.pages) {
+    if (!pageSizes.has(page)) pageSizes.set(page, encoder.encode(JSON.stringify(page)).length)
+    bytes += pageSizes.get(page)
+  }
+  return bytes
+}
 
 export function pageTitle(page) {
   return page.title.trim() || '未命名页面'
@@ -11,7 +29,8 @@ export function pageTitle(page) {
 
 export function makePage({ id = crypto.randomUUID(), title = '', markdown = '', parentId = null, kind = 'note', favorite = false } = {}) {
   const now = new Date().toISOString()
-  return { id, title, markdown, parentId, kind, favorite, createdAt: now, updatedAt: now, deletedAt: null }
+  return { id, title, markdown, parentId, kind, favorite, createdAt: now, updatedAt: now, deletedAt: null,
+    ...(Object.hasOwn(officeKinds, kind) ? { content: {} } : {}) }
 }
 
 export function initialWorkspace() {
@@ -94,7 +113,8 @@ export function addPage(workspace, page) {
   if (page.parentId && !isVisible(byId.get(page.parentId), byId)) {
     throw new Error('父页面已移动到回收站。')
   }
-  return openPage({ ...workspace, pages: [...workspace.pages, page] }, page.id)
+  const schemaVersion = Object.hasOwn(officeKinds, page.kind) ? 2 : workspace.schemaVersion
+  return openPage({ ...workspace, schemaVersion, pages: [...workspace.pages, page] }, page.id)
 }
 
 export function updatePage(workspace, id, fields) {
@@ -151,7 +171,7 @@ export function setCollapsed(workspace, id, collapsed) {
 }
 
 export function assertWorkspace(workspace) {
-  if (!workspace || workspace.schemaVersion !== 1 || !Number.isSafeInteger(workspace.revision) || workspace.revision < 0 ||
+  if (!workspace || ![1, 2].includes(workspace.schemaVersion) || !Number.isSafeInteger(workspace.revision) || workspace.revision < 0 ||
       !Array.isArray(workspace.pages) || workspace.pages.length > MAX_PAGES || !Array.isArray(workspace.collapsedIds)) {
     throw new Error('工作区文件格式无法读取。')
   }
@@ -162,6 +182,7 @@ export function assertWorkspace(workspace) {
         typeof page.title !== 'string' || page.title.length > MAX_TITLE_LENGTH ||
         typeof page.markdown !== 'string' || page.markdown.length > MAX_MARKDOWN_LENGTH ||
         !pageKinds.has(page.kind) || typeof page.favorite !== 'boolean' ||
+        (Object.hasOwn(officeKinds, page.kind) && (workspace.schemaVersion !== 2 || !page.content || typeof page.content !== 'object' || Array.isArray(page.content))) ||
         typeof page.createdAt !== 'string' || typeof page.updatedAt !== 'string' ||
         !(page.deletedAt === null || typeof page.deletedAt === 'string')) {
       throw new Error('工作区包含无效的页面。')

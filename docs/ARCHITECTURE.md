@@ -1,293 +1,76 @@
-# 砚页 YanYe 技术架构
+# 砚页 YanYe 技术架构说明
 
-## 总体目标
+## 0.2 的运行结构
 
-架构需要同时满足本地优先、模块可插拔、实时协作和 Windows 桌面交付。核心原则是让所有内容都能被页面引用、被权限控制、被搜索索引，并且在离线时仍然可以编辑。
+砚页运行在 Windows x64 的 Electron 窗口中。React 渲染页面树和各编辑器，Vite 构建本地界面。文件读写与系统对话框由主进程负责，渲染进程通过启用上下文隔离的预加载接口访问它们。
 
-## 目标分层结构
+| 位置 | 职责 |
+| --- | --- |
+| `electron/main.mjs`、`electron/preload.cjs` | 窗口生命周期、文件选择、格式与大小检查、PDF 打印、受限的 IPC 接口 |
+| `electron/store.mjs` | 读取、校验、排队写入本地工作区快照 |
+| `shared/workspace.mjs` | 页面类型、工作区版本、树结构、回收站、容量及数据完整性检查 |
+| `src/App.jsx`、`src/workspace-ui.jsx` | 页面切换、编辑分派、搜索、保存状态及工作区交互 |
+| `src/editor.jsx` | Tiptap 富文本编辑、Markdown 源码、大纲、文档工具栏 |
+| `src/modules/` | 电子表格、多维表格、白板和演示的 React 编辑界面、内容模型、文件交换 |
 
-0.1 已实现 Electron、React、Tiptap 和本地 JSON 工作区。图中的模块运行时、SQLite、同步服务和远端索引均为后续设计。
+## 工作区数据与兼容
 
-```mermaid
-flowchart TB
-  UI[React 工作区界面]
-  Modules[模块运行时\n文档 / 表格 / 画布 / 演示]
-  Model[统一内容模型\nPage / Block / Record / Canvas]
-  Local[本地存储\nSQLite + Blob Cache]
-  Sync[同步引擎\nOutbox + CRDT + Presence]
-  Server[可选同步服务\nAPI / WebSocket / Object Storage]
-  Search[本地与服务端索引]
+工作区根对象含 `schemaVersion`、`revision`、`activeId`、`collapsedIds` 和 `pages`。页面公共属性包括稳定 ID、父页面 ID、类型、标题、收藏标记及时间戳。移入回收站记录删除时间，恢复页面时沿用原 ID。搜索读取页面标题、Markdown 和办公内容中的可检索文本。
 
-  UI --> Modules
-  Modules --> Model
-  Model --> Local
-  Model --> Sync
-  Sync -.联网时.-> Server
-  Local --> Search
-  Server --> Search
-```
+| 页面类型 | 持久化内容 |
+| --- | --- |
+| Markdown 与早期内建页面 | `page.markdown` 是 Markdown 原文 |
+| `spreadsheet` | 工作表列表及活动表，单元格地址映射到原始输入，另存格式和表内设置 |
+| `database` | 字段定义、记录及字段值、当前视图、分组字段和日期字段 |
+| `canvas` | 节点、按节点 ID 连接的边、自由笔迹和视口 |
+| `presentation` | 主题和有序幻灯片数组，逐页保存版式、标题、正文、第二栏、备注及可选的内嵌图片 |
 
-## Windows 客户端
+四类办公页面在 `page.content` 内维护各自的内容模型。新页的空对象交由对应编辑器解释为初始内容。工作区读取兼容 schema 1 和 2。首次创建办公页面时升级到 schema 2，原有 Markdown 页继续从原字段读取。
 
-当前客户端使用 Electron。
+## 保存与恢复
 
-### 主进程
+1. 用户修改页面时，渲染进程更新工作区快照与修订号，并通过预加载接口交给主进程。主进程只接收更新的修订。
+2. 存储层串行写入，在目标目录创建临时文件并替换 `workspace.json`。一次写入进行时如有更新，后续写入继续保存较新的快照。
+3. 手动保存等待写入结束。关闭窗口时，主进程请求渲染进程交出最终快照并等待落盘。读取已有文件遇到解析或结构错误时报告错误。首次运行且文件不存在时建立初始工作区。
 
-- 创建窗口并加载 `yanye://app/index.html`
-- 管理本地工作区路径和文件对话框
-- 处理导入、导出、外链和目录打开
-- 配置上下文隔离、禁用 Node 集成、内容安全策略和导航限制
-- 处理关窗保存和原子写入
+默认位置为 `%APPDATA%\YanYe\workspace.json`，`YANYE_PROFILE` 可指定独立目录。工作区最多 2,000 页，单页 Markdown 最多 2,000,000 个字符，整个工作区序列化后最多 24 MiB。内嵌图像同样计入总量。关闭应用后复制工作区文件即可做整库备份。
 
-### 渲染进程
+## 各编辑器如何工作
 
-- React 负责工作区布局、页面树和模块容器
-- Tiptap 负责文档和 Markdown 编辑
-- 现有编辑器挂载在页面树选中的文档上。后续计划通过统一的模块入口注册工具栏、内容渲染器和快捷键。
-- 所有渲染模块通过 IPC 或同步 API 访问数据，不直接读写文件
+### Markdown
 
-### 预加载层
+编辑器在 Tiptap 文档与 Markdown 间转换，源码模式直接修改原文。遇到富文本转换无法可靠往返的语法时优先使用源码。大纲和任务统计从当前内容提取。[文档编辑界面](../src/editor.jsx)
 
-预加载脚本只暴露明确的命令接口，例如加载工作区、保存快照、导入文件、导出文件、打开目录和打开外链。新模块需要先增加白名单命令，再接入界面。
+### 电子表格
 
-## 目标内容模型
+工作表按 A1 地址稀疏存储。公式解析器识别基础运算、绝对与相对引用、跨表引用、区间和内置函数，在读取显示值时求值。公式错误以单元格错误值呈现。插入或删除行列、重命名工作表会处理对应引用。排序筛选影响显示顺序，柱状图从选定列的数值和首列标签取数。[工作表模型](../src/modules/spreadsheet.js)
 
-### 页面
-
-```ts
-type Page = {
-  id: string
-  workspaceId: string
-  parentId: string | null
-  kind: 'document' | 'spreadsheet' | 'database' | 'canvas' | 'presentation'
-  title: string
-  icon?: string
-  cover?: string
-  favorite: boolean
-  createdAt: string
-  updatedAt: string
-  deletedAt: string | null
-}
-```
-
-### 文档块
-
-```ts
-type Block = {
-  id: string
-  pageId: string
-  type: string
-  position: number
-  props: Record<string, unknown>
-  text?: string
-  children?: string[]
-}
-```
+XLSX 适配器使用 ExcelJS，将单元格输入、公式和部分常用数字格式映射到工作簿。导出保留支持的原生公式，CSV 导出使用计算后的值。编辑器柱状图属于砚页的表内设置，XLSX 写出逻辑处理单元格值与格式。[XLSX 适配器](../src/modules/spreadsheet-xlsx.js)
 
 ### 多维表格
 
-```ts
-type Database = {
-  id: string
-  pageId: string
-  fields: Field[]
-  records: RecordRow[]
-  views: DatabaseView[]
-}
-```
+字段与记录都使用稳定 ID，每条记录以字段 ID 为键保存值。同表关联保存目标记录 ID，公式字段从指定的两个数值字段计算。表格、按单选值分组的看板、按日期字段排布的日历共用记录集合，更新卡片会写回对应字段。[多维表格模型](../src/modules/database.js)
 
-### 画布
+JSON 备份保存完整模型，导入时校验字段与记录。CSV 和 XLSX 输出显示值，适合交给外部工具处理。导入二维文件时按表头重新建字段，XLSX 取第一张工作表。[多维表格编辑器与文件交换](../src/modules/Database.jsx)
 
-```ts
-type Canvas = {
-  id: string
-  pageId: string
-  objects: CanvasObject[]
-  viewport: { x: number; y: number; zoom: number }
-}
-```
+### 流程图与白板
+
+SVG 编辑区按节点、连接线和笔迹渲染。边保存端点节点 ID 和文字，绘制时根据节点位置计算端点。平移缩放使用独立视口，编辑操作支持撤销和重做。JSON 备份可恢复模型。完整场景可导出 SVG、PNG，流程关系可转换为 Mermaid。[画布模型](../src/modules/canvas-model.js) · [白板编辑器](../src/modules/Canvas.jsx)
 
 ### 演示文稿
 
-```ts
-type Presentation = {
-  id: string
-  pageId: string
-  themeId: string
-  slides: Slide[]
-  notes: Record<string, string>
-}
-```
+编辑、放映和导出使用相同的版式定义。文档大纲转换读取当时的 Markdown，创建独立幻灯片。PptxGenJS 将文字、图片与备注写入 PPTX。导入使用 JSZip 读取 Office Open XML 部件，并将支持的文字、备注和配图映射到砚页版式。[版式与文档转换](../src/modules/slides-model.js) · [PPTX 适配器](../src/modules/slides-pptx.js)
 
-页面元数据与模块内容分开保存。页面树更新只修改 `Page`。具体模块更新只修改自己的内容表和版本记录。
+PDF 导出时，渲染进程建立完整的 16∶9 打印页，等待字体与图片就绪，再由 Electron 调用 `webContents.printToPDF` 输出。打印样式按页分页，并隐藏桌面控件与讲者备注。[演示文稿界面](../src/modules/Slides.jsx) · [桌面主进程](../electron/main.mjs)
 
-## 本地存储
+## 验证与发布
 
-### MVP
+- `pnpm test` 运行 Node 测试，涵盖工作区和模块模型及受支持的格式交换。
+- `pnpm test:desktop` 构建渲染资源，在 Electron 中验证桌面操作、持久化与文件交互。
+- `pnpm package:win` 构建 Windows x64 便携目录。分发时需要保留 `YanYe.exe` 和同目录的运行时与资源。
 
-当前版本使用 JSON 工作区快照和原子替换写入，适合单用户和小型本地数据。
+## 演进顺序
 
-### 目标架构
+先扩展本地文档排版、Office 文件转换和各编辑器。工作区格式如需拆分附件或扩展存储，应提供现有本地数据的迁移和恢复路径，并用旧版工作区与代表性文件做回归。再完成本地备份恢复、附件管理及历史记录。
 
-- SQLite 保存页面元数据、块、记录、字段、画布对象和操作日志
-- Blob Cache 保存图片、附件、缩略图和导出临时文件
-- 每个实体拥有单调递增版本号
-- 写入使用事务，附件使用内容寻址
-- 回收站只是软删除，清理操作需要明确的用户动作
-
-迁移旧工作区时先在临时数据库导入 JSON，保留页面 ID、父子关系、回收站状态和原始 Markdown，校验页数及各页正文后再切换。升级中断后仍可从原 JSON 打开。
-
-推荐目录结构如下。
-
-```text
-%APPDATA%\YanYe\
-├── workspace.db
-├── blobs\
-├── thumbnails\
-├── exports\
-└── logs\
-```
-
-## 实时同步
-
-以下为协议设计。每项操作带唯一 ID，客户端在同一事务中保存内容变更和待发送记录。服务端完成权限检查和持久化后才确认，重复上传返回相同确认。界面分别标记“已保存到本机”和“已同步”。已撤权设备的待发送修改可另存本地副本。
-
-### 同步对象
-
-- 页面元数据
-- 文档块
-- 表格字段和记录
-- 画布对象
-- 演示文稿元素
-- 评论和反应
-
-### 操作流
-
-```text
-用户操作
-  -> 生成操作记录
-  -> 写入本地事务
-  -> 写入 Outbox
-  -> 本地界面立即应用
-  -> 网络可用时上传
-  -> 服务端广播远端操作
-  -> 客户端按实体合并
-  -> 标记已确认操作
-```
-
-### 冲突策略
-
-- 文档块使用基于操作的 CRDT 或 Yjs 文档
-- 表格单元格和记录字段使用字段级合并
-- 画布对象使用对象级合并，位置冲突保留最近编辑并写入历史
-- 页面标题、收藏和页面移动采用服务端版本校验
-- 无法自动合并时显示差异，不静默覆盖用户内容
-
-### 在线状态
-
-Presence 只用于光标、选区、正在输入和当前页面等短生命周期信息，不写入内容历史。连接断开后客户端清理本地 Presence。
-
-## 权限模型
-
-权限按工作区、页面、数据库和分享链接分层。
-
-| 角色 | 查看 | 评论 | 编辑 | 管理 |
-|---|---:|---:|---:|---:|
-| 只读 | ✓ |  |  |  |
-| 评论者 | ✓ | ✓ |  |  |
-| 编辑者 | ✓ | ✓ | ✓ |  |
-| 管理员 | ✓ | ✓ | ✓ | ✓ |
-
-数据库还需要字段级和视图级权限。附件下载、导出和外链分享都经过权限检查。服务端只返回当前用户可以看到的实体。
-
-## 搜索架构
-
-- 本地 SQLite FTS 索引页面标题、正文块、表格记录和评论
-- 服务端使用同构索引，返回实体 ID、匹配片段和权限过滤后的结果
-- 客户端先显示本地结果，再合并远端结果
-- 搜索结果必须携带页面路径、模块类型和最近更新时间
-- 附件内容索引放在后台队列，解析失败时保留附件名称搜索
-
-## 模块插件协议
-
-```ts
-type YanYeModule = {
-  id: string
-  title: string
-  icon: ComponentType
-  create(): ModuleDocument
-  render(document: ModuleDocument, context: ModuleContext): ReactNode
-  commands: CommandDefinition[]
-  exportFormats: string[]
-}
-```
-
-首批内置模块为 `document`、`spreadsheet`、`database`、`canvas` 和 `presentation`。插件运行在受控沙箱中，不能直接调用 Electron 主进程。
-
-## 导入导出目标
-
-现版实现 UTF-8 Markdown 文件交换。下表是各模块的格式支持目标。Office 兼容性按样例验收，分别测试导入、编辑、导出和重新打开；发现不支持的对象时给出转换清单并保留原始文件。
-
-| 模块 | 导入 | 导出 |
-|---|---|---|
-| 文档 | Markdown、HTML、DOCX | Markdown、HTML、DOCX、PDF |
-| 电子表格 | CSV、XLSX | CSV、XLSX、PDF |
-| 多维表格 | CSV、JSON | CSV、JSON、XLSX |
-| 画布 | Mermaid、SVG、JSON | SVG、PNG、PDF、Mermaid |
-| 演示文稿 | PPTX、图片 | PPTX、PDF、图片 |
-
-导入过程生成可回滚的导入批次。导出过程在后台执行，失败时保留原始页面和临时文件。
-
-## 安全边界
-
-- 渲染进程不能访问 Node API
-- IPC 命令使用固定通道和参数校验
-- 自定义协议只允许加载应用资源
-- 外链使用系统浏览器打开，禁止页面内任意导航
-- 导入文件限制大小、扩展名和解析时间
-- 当前识别出原始 HTML 的 Markdown 会在源码模式编辑。未来的 HTML 格式导入器需先清理内容再转换成可编辑节点。
-- 分享链接使用短期令牌和可撤销权限
-- 同步服务使用最小权限的对象存储凭证
-
-## 测试策略
-
-### 单元测试
-
-- 页面树增删改移和回收站
-- 块转换和 Markdown round-trip
-- 表格公式和字段校验
-- 画布对象序列化
-- 权限判断
-- 操作日志合并
-
-### 集成测试
-
-- 本地写入和崩溃恢复
-- 导入导出
-- 同步断线重连
-- 两端并发编辑
-- 大表格滚动和筛选
-- 画布导出
-
-### 桌面端测试
-
-- Electron 窗口启动
-- 键盘快捷键
-- 文件对话框
-- 关闭窗口保存
-- 打包后的 Windows 便携版
-
-## 开源仓库结构
-
-```text
-src/              React 渲染器与模块界面
-electron/         Windows 外壳、IPC 和本地能力
-shared/           共享数据模型与校验
-modules/          后续文档、表格、画布、演示模块
-server/           可选同步服务
-packages/         共享协议、导入导出和测试工具
-docs/             产品规格、架构和决策记录
-test/             单元、集成和桌面端测试
-```
-
-仓库默认只包含本地客户端和共享模型。同步服务可以单独部署，避免用户被绑定到单一云服务。
+最后开发团队文档协作。待所有本地里程碑完成后，再设计身份与权限、共享文档、多人编辑协议、重连及冲突处理。[产品路线与验收条件](PRODUCT_SPEC.md)

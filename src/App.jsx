@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownToLine, ChevronRight, CircleAlert, FolderTree, LayoutList, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import {
   addPage, ancestors, canMoveTo, indexPages, makePage, MAX_MARKDOWN_LENGTH, movePage, openPage, pageTitle,
-  restorePage, setCollapsed, trashPage, updatePage, visiblePages,
+  restorePage, setCollapsed, trashPage, updatePage, visiblePages, MAX_WORKSPACE_BYTES, officeKinds, workspaceBytes,
 } from '../shared/workspace.mjs'
 import { DocumentEditor } from './editor.jsx'
+import { OfficePage } from './office-page.jsx'
 import { Breadcrumbs, Dialog, EmptyWorkspace, IconButton, PageIcon, SearchDialog, Sidebar, TrashDialog } from './workspace-ui.jsx'
 
 const desktop = window.yanye
@@ -67,15 +68,19 @@ export function App() {
     const next = transform(current)
     if (next === current) return true
     const snapshot = { ...next, revision: current.revision + 1 }
+    if (workspaceBytes(snapshot) > MAX_WORKSPACE_BYTES) {
+      notify('工作区已达到 24 MiB 上限，此次改动未写入。可以缩小图片或拆分导入内容。')
+      return false
+    }
     latest.current = snapshot
     setWorkspace(snapshot)
     setSaveState({ state: 'pending' })
     desktop.stage(snapshot)
     return true
-  }, [])
+  }, [notify])
 
-  const create = useCallback((parentId = null) => {
-    const page = makePage({ parentId })
+  const create = useCallback((parentId = null, kind = 'note') => {
+    const page = makePage({ parentId, kind, title: officeKinds[kind] ? '未命名' + officeKinds[kind] : '' })
     try {
       if (change(current => addPage(current, page))) {
         setModal(null)
@@ -102,7 +107,7 @@ export function App() {
       if (!['k', 'n', 's'].includes(key)) return
       event.preventDefault()
       if (key === 'k') setModal(current => current?.type === 'search' ? null : { type: 'search' })
-      if (key === 'n') create()
+      if (key === 'n') setModal({ type: 'new', parentId: null })
       if (key === 's') void save()
     }
     window.addEventListener('keydown', shortcuts, true)
@@ -124,8 +129,7 @@ export function App() {
     try {
       const source = await desktop.importMarkdown()
       if (!source) return
-      change(current => addPage(current, makePage(source)))
-      notify('已导入 Markdown')
+      if (change(current => addPage(current, makePage(source)))) notify('已导入 Markdown')
     } catch (error) {
       notify(errorText(error))
     }
@@ -157,7 +161,7 @@ export function App() {
   const closeModal = () => setModal(null)
   const pageMenu = id => setModal({ type: 'page', id })
   const actions = {
-    create, open, pageMenu, importMarkdown,
+    create: (parentId = null) => setModal({ type: 'new', parentId }), open, pageMenu, importMarkdown,
     collapse: (id, collapsed) => change(current => setCollapsed(current, id, collapsed)),
     search: () => setModal({ type: 'search' }),
     trash: () => setModal({ type: 'trash' }),
@@ -188,15 +192,22 @@ export function App() {
         <Breadcrumbs page={page} byId={byId} onOpen={open} />
         <div className="window-drag-spacer" />
       </header>
-      {page ? <DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}
+      {page && officeKinds[page.kind] ? <OfficePage key={page.id} page={page} pages={pages}
+        focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={saveState} onSave={save}
+        onEdit={fields => edit(page.id, fields)} onMenu={() => pageMenu(page.id)} onFavorite={() => favorite(page)} />
+        : page ? <DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}
         focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={saveState} onSave={save}
         contextOpen={contextOpen} onContextToggle={() => setContextOpen(value => !value)}
         onChange={fields => edit(page.id, fields)} onOpenPage={open} onCreateChild={() => create(page.id)}
         onFavorite={() => favorite(page)} onExport={() => exportMarkdown(page.id)} onMenu={() => pageMenu(page.id)}
         onExternalLink={href => desktop.openLink(href).catch(error => notify(errorText(error)))} />
-        : <EmptyWorkspace onCreate={() => create()} />}
+        : <EmptyWorkspace onCreate={() => actions.create()} />}
     </main>
 
+    {modal?.type === 'new' && <Dialog title="新建本地页面" onClose={closeModal}>
+      <div className="action-list">{Object.entries({note: 'Markdown 文档', ...officeKinds}).map(([kind, label]) =>
+        <button type="button" key={kind} onClick={() => create(modal.parentId, kind)}><PageIcon page={{ kind }} />{label}</button>)}</div>
+    </Dialog>}
     {modal?.type === 'search' && <SearchDialog pages={pages} byId={byId} onSelect={open} onClose={closeModal} />}
     {modal?.type === 'trash' && <TrashDialog pages={allPages} byId={byId} onClose={closeModal} onRestore={id => {
       change(current => restorePage(current, id)); closeModal(); notify('页面已恢复')
@@ -204,11 +215,11 @@ export function App() {
     {modal?.type === 'page' && modalPage && <Dialog key="page-actions" title="页面操作" onClose={closeModal}>
       <div className="action-title"><PageIcon page={modalPage} />{pageTitle(modalPage)}</div>
       <div className="action-list">
-        <button type="button" onClick={() => create(modalPage.id)}><Plus size={17} />新建子页面</button>
+        <button type="button" onClick={() => actions.create(modalPage.id)}><Plus size={17} />新建子页面</button>
         <button type="button" onClick={() => { open(modalPage.id); setFocusTitle({ id: modalPage.id }) }}><Pencil size={17} />重命名</button>
         <button type="button" onClick={() => { favorite(modalPage); closeModal() }}><Star size={17} />{modalPage.favorite ? '取消收藏' : '收藏页面'}</button>
         <button type="button" onClick={() => setModal({ type: 'move', id: modalPage.id })}><FolderTree size={17} />移动到</button>
-        <button type="button" onClick={() => exportMarkdown(modalPage.id)}><ArrowDownToLine size={17} />导出 Markdown</button>
+        {!officeKinds[modalPage.kind] && <button type="button" onClick={() => exportMarkdown(modalPage.id)}><ArrowDownToLine size={17} />导出 Markdown</button>}
         <button type="button" className="danger-action" onClick={() => {
           change(current => trashPage(current, modalPage.id)); closeModal(); notify('页面已移到回收站')
         }}><Trash2 size={17} />移到回收站</button>

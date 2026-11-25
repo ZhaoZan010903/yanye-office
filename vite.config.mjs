@@ -5,6 +5,7 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   build: {
+    license: { fileName: 'third-party-licenses.md' },
     modulePreload: { polyfill: false },
     rollupOptions: {
       output: {

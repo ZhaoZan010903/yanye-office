@@ -1,10 +1,10 @@
 {
   "name": "yanye",
   "productName": "砚页",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "YanYe Team",
   "license": "MIT",
-  "description": "YanYe 砚页，面向 Windows 的开源集成办公协作软件",
+  "description": "砚页 YanYe，面向 Windows 的本地文档、表格、白板与演示工作区",
   "private": true,
   "type": "module",
   "main": "electron/main.mjs",
@@ -14,7 +14,7 @@
     "build": "vite build",
     "start": "pnpm build && electron .",
     "package:win": "pnpm build && node scripts/package-win.mjs",
-    "test": "node --test test/workspace.test.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "test:desktop": "pnpm build && node test/desktop.mjs"
   },
   "dependencies": {
@@ -29,7 +29,10 @@
     "@tiptap/react": "3.35.0",
     "@tiptap/starter-kit": "3.35.0",
     "@tiptap/suggestion": "3.35.0",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1",
     "lucide-react": "1.79.0",
+    "pptxgenjs": "4.0.1",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

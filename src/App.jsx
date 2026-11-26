@@ -7,6 +7,7 @@ import {
 import { workspaceDelta } from '../shared/workspace-delta.mjs'
 import { TextEncodingDialog } from './text-encoding-dialog.jsx'
 import { OfficePage } from './office-page.jsx'
+import OfficeFileBar from './office/OfficeFileBar.jsx'
 import { FileCenter } from './FileCenter.jsx'
 import { fileTitle, pageExtension } from './office-files.js'
 import { useDiskFiles } from './use-disk-files.js'
@@ -47,6 +48,8 @@ export function App() {
   const [notice, setNotice] = useState('')
   const [focusTitle, setFocusTitle] = useState(null)
   const [navigationOpen, setNavigationOpen] = useState(true)
+  const [officeNavigation, setOfficeNavigation] = useState(() => localStorage.getItem('office-navigation') === 'open')
+  const [tabToolsHost,setTabToolsHost] = useState(null)
   const [contextOpen, setContextOpen] = useState(() => window.innerWidth >= 1050)
   const [screen, setScreen] = useState(() => localStorage.getItem('office-screen') === 'editor' ? 'editor' : 'files')
   const [tabs,setTabs] = useState(() => {
@@ -162,7 +165,8 @@ export function App() {
       if (document.querySelector('dialog[open]') && key !== 'k') return
       if (key === 'k') setModal(current => current?.type === 'search' ? null : { type: 'search' })
       if (key === 'n') {
-        if (screen === 'files' || latest.current.pages.find(p=>p.id===latest.current.activeId)?.disk) {
+        const active = latest.current.pages.find(p=>p.id===latest.current.activeId)
+        if (screen === 'files' || active?.disk || ['word','spreadsheet','presentation'].includes(active?.kind)) {
           home(); setChooseNewFile(true)
         } else setModal({ type: 'new', parentId: null })
       }
@@ -286,10 +290,21 @@ export function App() {
 
   const diskState = page?.disk ? { ...saveState,label:page.disk.dirty ? '草稿已保存 · 文件有未写入的修改' : '文件已保存到磁盘' } : saveState
   const diskTabs = tabs.map(id => pages.find(p=>p.id===id && p.disk)).filter(Boolean)
-  return <div className={`application ${navigationOpen ? '' : 'navigation-hidden'}`}>
-    {navigationOpen && <Sidebar pages={pages} workspace={workspace} activeId={screen === 'editor' ? workspace.activeId : null} directory={directory} actions={actions} />}
+  const ribbonWorkspace = screen === 'editor' && ['word','spreadsheet','presentation'].includes(page?.kind)
+  const showSidebar = ribbonWorkspace ? officeNavigation : navigationOpen
+  const fileControls = ribbonWorkspace && <OfficeFileBar disk={page.disk} busy={files.busy}
+    navigationOpen={officeNavigation} toggleNavigation={() => {
+      const next = !officeNavigation
+      setOfficeNavigation(next)
+      localStorage.setItem('office-navigation', next ? 'open' : 'closed')
+    }} home={home} create={() => { home(); setChooseNewFile(true) }}
+    open={() => files.openFile(() => desktop.library.chooseOpen()).catch(handleFileError)}
+    save={() => page.disk ? files.saveFile(page.id).catch(handleFileError) : save()}
+    saveAs={() => files.saveFile(page.id,true).catch(handleFileError)}/>
+  return <div className={`application ${showSidebar ? '' : 'navigation-hidden'}`} data-office-workspace={ribbonWorkspace}>
+    {showSidebar && <Sidebar pages={pages} workspace={workspace} activeId={screen === 'editor' ? workspace.activeId : null} directory={directory} actions={actions} />}
     <main className="main-pane">
-      <header className="window-bar">
+      {!ribbonWorkspace && <header className="window-bar">
         <IconButton className="window-control" icon={navigationOpen ? PanelLeftClose : PanelLeftOpen} label={navigationOpen ? '收起侧栏' : '显示侧栏'}
           onClick={() => setNavigationOpen(value => !value)} />
         <span className="bar-divider" />
@@ -300,14 +315,15 @@ export function App() {
             <button disabled={files.busy} onClick={() => files.saveFile(page.id,true).catch(handleFileError)} title="Ctrl+Shift+S">{page.disk ? '另存为' : '导出文件'}</button>
           </div>}</>}
         <div className="window-drag-spacer" />
-      </header>
-      {diskTabs.length > 0 && <nav className="disk-tabs" aria-label="打开的文件">{diskTabs.map(p =>
+      </header>}
+      {diskTabs.length > 0 && <div className={ribbonWorkspace ? 'office-documents-row' : 'documents-row'}><nav className="disk-tabs" aria-label="打开的文件">{diskTabs.map(p =>
         <div className={'disk-tab type-'+p.disk.extension} key={p.id} aria-current={p.id===page?.id && screen==='editor' ? 'page' : undefined}>
           <button onClick={() => open(p.id)} title={p.disk.name}><PageIcon page={p} size={14}/><span>{p.disk.name}</span>{p.disk.dirty && <i className="disk-tab-dot" title="文件有未写入的修改"/>}</button>
           <button className="close-tab" aria-label={'关闭标签 '+p.disk.name} onClick={() => closeTab(p.id)}><X size={12}/></button>
-        </div>)}</nav>}
+        </div>)}</nav>{ribbonWorkspace && page.disk && <div className="office-document-tools" ref={setTabToolsHost}/>}</div>}
       {fileError && <div className="files-feedback" role="alert">{fileError}<IconButton icon={X} label="关闭文件错误" onClick={()=>setFileError('')}/></div>}
       {screen === 'files' ? <FileCenter files={files} onMutate={syncFileNames} chooseNew={chooseNewFile} onChosen={()=>setChooseNewFile(false)}/> : page && officeKinds[page.kind] ? <OfficePage key={page.id} page={page} pages={pages}
+        fileControls={fileControls} tabToolsHost={page.disk && ribbonWorkspace ? tabToolsHost : null}
         focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={diskState} onSave={save}
         onEdit={fields => edit(page.id, fields)} onMenu={() => pageMenu(page.id)} onFavorite={() => favorite(page)} />
         : page ? <Suspense fallback={<p role="status">正在打开电子文档…</p>}><DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}

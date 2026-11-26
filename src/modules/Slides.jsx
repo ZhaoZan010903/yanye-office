@@ -1,8 +1,9 @@
 import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
-import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, ImagePlus, Move, PanelTop, Play, Plus, Printer, Shapes, Trash2, Type, X } from 'lucide-react'
-import { moveSlide, newSlide, readDeck, shapeKinds, slideBoxes, slideLayouts, slideShape, slidesFromDocument, slideThemes, textBox } from './slides-model.js'
+import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, GalleryHorizontalEnd, ImagePlus, LayoutGrid, Move, PanelTop, Play, Plus, Printer, Shapes, Trash2, Type, X } from 'lucide-react'
+import { fieldFormat, moveSlide, newSlide, readDeck, shapeKinds, slideBoxes, slideLayouts, slideShape, slidesFromDocument, slideTextStyle, slideThemes, textBox } from './slides-model.js'
+import { SlidePositionTools, SlideTextTools, SlideZoomTools } from './SlideRibbonTools.jsx'
 import { ShapeProperties, SlideShape } from './SlideShapes.jsx'
 import { slideTransition, speedNames, transitionNames } from './slide-transition.js'
 import {AnimatedPage,AnimationPanel} from './SlideAnimations.jsx'
@@ -19,8 +20,7 @@ function FreeText({ box, index, selected, select, update, split }) {
   const drag = useRef(null)
   const [preview,setPreview] = useState(null)
   const position = preview || box
-  const style = { ...positioned(position), color:'#' + box.color, fontSize:box.fontSize / 9.6 + 'cqw',
-    fontFamily:box.fontFace, fontStyle:box.italic?'italic':undefined, fontWeight:box.bold?700:400, textAlign:box.align }
+  const style = { ...positioned(position), ...slideTextStyle(box) }
   if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}><SlideParagraphs text={box.text} split={split}/></div>
   function dragPosition(e) {
     const start = drag.current
@@ -44,18 +44,14 @@ function FreeText({ box, index, selected, select, update, split }) {
   </div>
 }
 
-function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit }) {
+function SlidePage({ slide, theme, edit, onImage, onFieldSelect, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit }) {
   const boxes = slideBoxes(slide.layout)
   const split=new Set((slide.animations||[]).filter(e=>e.byParagraph || e.paragraph!=null).map(e=>e.target))
   const fields = { title: '幻灯片标题', body: '幻灯片正文', side: '右栏正文' }
   const placeholders = { title: '输入标题', body: slide.layout === 'cover' ? '添加副标题' : '添加正文', side: '添加右栏正文' }
   return <div className="slides-page" style={{ '--slide-paper': '#' + theme.background, '--slide-ink': '#' + theme.ink }}>
     {Object.entries(boxes).map(([field, box]) => {
-      const style = field==='title' && slide.titleBox ? {
-        ...positioned(slide.titleBox), color:'#'+slide.titleBox.color, fontFamily:slide.titleBox.fontFace,
-        fontSize:slide.titleBox.fontSize/9.6+'cqw',fontWeight:slide.titleBox.bold?700:400,
-        fontStyle:slide.titleBox.italic?'italic':undefined,textAlign:slide.titleBox.align,
-      } : positioned(box)
+      const style = { ...positioned(field==='title' && slide.titleBox || box), ...slideTextStyle(fieldFormat(slide,field,theme)) }
       if (field === 'side' && slide.layout === 'image') {
         return <div key="image" data-animation-target="image" className="slides-image-box" style={style}>
           {slide.image ? <img src={slide.image.data} alt={slide.image.name || '幻灯片插图'} /> :
@@ -64,7 +60,7 @@ function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit,
       }
       const className = 'slides-text slides-' + field + (slide.layout === 'cover' ? ' cover' : '')
       return edit ? <textarea key={field} className={className} style={style} aria-label={fields[field]}
-        placeholder={placeholders[field]} value={slide[field] || ''} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
+        placeholder={placeholders[field]} value={slide[field] || ''} onFocus={()=>onFieldSelect(field)} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
         <div key={field} data-animation-target={field} className={className} style={style}><SlideParagraphs text={slide[field]} split={split.has(field)}/></div>
     })}
     {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId} split={split.has(shape.id)}
@@ -94,13 +90,35 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   const [deleted, setDeleted] = useState(null)
   const [boxId,setBoxId] = useState(null)
   const [shapeId,setShapeId] = useState(null), [shapeKind,setShapeKind] = useState('rect')
+  const [activeField,setActiveField] = useState('title')
+  const [view,setView] = useState('normal'), [showGrid,setShowGrid] = useState(false)
+  const [showNotes,setShowNotes] = useState(true), [showThumbs,setShowThumbs] = useState(true), [zoom,setZoom] = useState(100)
   const shapes=selected.shapes || [], currentShape=shapes.find(s=>s.id===shapeId)
   const transition=slideTransition(selected.transition)
   function setTransition(patch) { changeSlide(selected.id,{transition:slideTransition({...transition,...patch})}) }
   function selectBox(id) { setBoxId(id);setShapeId(null) }
   function selectShape(id) { setShapeId(id);setBoxId(null) }
+  function selectField(field) { setActiveField(field);setShapeId(null);setBoxId(null) }
   const freeBoxes = selected.textBoxes || []
   const currentBox = freeBoxes.find(box => box.id === boxId)
+  const field = activeField==='side' && selected.layout!=='columns' ? 'body' : activeField
+  const currentObject=currentShape || currentBox
+  const activeFormat=currentShape ? {...currentShape,align:currentShape.shapeTextAlign || 'center'} : currentBox || fieldFormat(selected,field,theme)
+  const formatTarget=currentShape ? '形状' : currentBox ? '文本框' : {title:'标题',body:'正文',side:'右栏'}[field]
+  function changeFormat(patch) {
+    if (currentShape) editShape(shapeId,patch.align ? {shapeTextAlign:patch.align} : patch)
+    else if (currentBox) editBox(boxId,patch)
+    else changeSlide(selected.id,{fieldFormats:{...selected.fieldFormats,[field]:{...selected.fieldFormats?.[field],...patch}}})
+  }
+  function duplicateObject() {
+    if (currentShape) { insertShape(currentShape);return }
+    const box=textBox({...currentBox,id:crypto.randomUUID(),x:currentBox.x+.03,y:currentBox.y+.03})
+    if (changeSlide(selected.id,{textBoxes:[...freeBoxes,box]})) selectBox(box.id)
+  }
+  function removeObject() {
+    const patch=currentShape ? {shapes:shapes.filter(s=>s.id!==shapeId)} : {textBoxes:freeBoxes.filter(b=>b.id!==boxId)}
+    if (changeSlide(selected.id,patch)) selectField('title')
+  }
   const playback=useRef(null)
   const root = useRef(null)
   const imageInput = useRef(null)
@@ -286,32 +304,35 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         <button type="button" onClick={endShow}>退出放映 <kbd>Esc</kbd></button>
       </div>
     </div> : <>
-      <Ribbon label="演示" tabs={['开始','插入','设计','切换','动画','放映','文件']} active={tab}
-        onChange={next=>{setTab(next);setPanel(next==='切换'?'transition':'')}}/>
-      {tab==='动画' && <AnimationPanel key={selected.id} slide={selected} onChange={animations=>changeSlide(selected.id,{animations})}/>}
+      <Ribbon label="演示" tabs={['开始','插入','设计','切换','动画','放映','视图','导入导出']} active={tab}
+        onChange={next=>{setTab(next);setPanel(next==='切换'?'transition':''); if(next!=='视图') setView('normal')}}/>
+      {tab==='动画' && <AnimationPanel key={selected.id} slide={selected} onPreview={show} onChange={animations=>changeSlide(selected.id,{animations})}/>}
       {tab!=='切换' && tab!=='动画' && <div className="slides-toolbar ribbon-panel">
         {tab==='开始' && <RibbonGroup label="幻灯片">
-        <button type="button" onClick={() => insert(false)}><Plus size={16} />新建幻灯片</button>
-        <button type="button" onClick={()=>insert(true)}><Copy size={15}/>复制当前页</button>
-        <button type="button" disabled={deck.slides.length<=1} onClick={remove}><Trash2 size={15}/>删除当前页</button>
+        <button type="button" className="slides-large-tool" onClick={() => insert(false)}><Plus size={22} />新建幻灯片</button>
+        <div className="slides-tool-stack"><button type="button" onClick={()=>insert(true)}><Copy size={15}/>复制当前页</button>
+        <button type="button" disabled={deck.slides.length<=1} onClick={remove}><Trash2 size={15}/>删除当前页</button></div>
         </RibbonGroup>}
-        {tab==='插入' && <RibbonGroup label="对象">
-        <button type="button" onClick={()=>imageInput.current.click()}><ImagePlus size={15}/>插入图片</button>
-        <button type="button" onClick={insertBox}><Type size={15}/>插入文本框</button>
+        {tab==='插入' && <><RibbonGroup label="图像">
+        <button type="button" className="slides-large-tool" onClick={()=>imageInput.current.click()}><ImagePlus size={22}/>插入图片</button></RibbonGroup>
+        <RibbonGroup label="文本"><button type="button" className="slides-large-tool" onClick={insertBox}><Type size={22}/>插入文本框</button></RibbonGroup>
+        <RibbonGroup label="插图"><div className="slides-tool-stack">
         <label>形状<select aria-label="形状类型" value={shapeKind} onChange={e=>setShapeKind(e.target.value)}>{Object.entries(shapeKinds).map(([type,label])=><option key={type} value={type}>{label}</option>)}</select></label>
         <button onClick={()=>insertShape()}><Shapes size={15}/>插入形状</button>
-        </RibbonGroup>}
+        </div></RibbonGroup></>}
         {(tab==='开始' || tab==='设计') && <RibbonGroup label="版式"><label>版式<select aria-label="幻灯片版式" value={selected.layout} onChange={e => changeSlide(selected.id, { layout: e.target.value })}>
           {Object.entries(slideLayouts).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select></label>
         </RibbonGroup>}
-        {tab==='设计' && <RibbonGroup label="主题"><label>主题<select aria-label="演示主题" value={deck.theme} onChange={e => save({ ...deck, theme: e.target.value })}>
-          {Object.entries(slideThemes).map(([id, t]) => <option key={id} value={id}>{t.name}</option>)}
-        </select></label>
-        </RibbonGroup>}
+        {tab==='开始' && <><SlideTextTools target={formatTarget} format={activeFormat} change={changeFormat}/>
+          <SlidePositionTools object={currentObject} update={patch=>currentShape ? editShape(shapeId,patch) : editBox(boxId,patch)}
+            duplicate={duplicateObject} remove={removeObject}/></>}
+        {tab==='设计' && <RibbonGroup label="主题">{Object.entries(slideThemes).map(([id,t])=><button type="button" key={id}
+          className="slides-theme-sample" aria-pressed={deck.theme===id} onClick={()=>save({...deck,theme:id})}>
+          <span aria-hidden="true" style={{background:'#'+t.background,color:'#'+t.ink,borderInlineStartColor:'#'+t.accent}}>Aa</span>{t.name}</button>)}</RibbonGroup>}
         {tab==='插入' && <RibbonGroup label="大纲"><button type="button" onClick={() => setPanel(panel === 'outline' ? '' : 'outline')} aria-expanded={panel === 'outline'}><PanelTop size={15} />文档大纲</button>
         </RibbonGroup>}
-        {tab==='文件' && <RibbonGroup label="导入与导出">
+        {tab==='导入导出' && <RibbonGroup label="导入与导出">
         <button type="button" onClick={() => setPanel(panel === 'import' ? '' : 'import')} aria-expanded={panel === 'import'}><FileInput size={15} />导入 PPTX</button>
         <button type="button" disabled={busy} onClick={exportFile}><FileDown size={15} />导出 PPTX</button>
         <button type="button" disabled={busy || !onPrintPdf} onClick={printDeck} title="将所有幻灯片导出为 PDF"><Printer size={15} />导出 PDF</button>
@@ -320,39 +341,41 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         <button type="button" onClick={()=>{setActiveId(deck.slides[0].id);show()}} title="从头开始（F5）"><Play size={15}/>从头开始</button>
         <button type="button" className="slides-play" onClick={show} title="从当前页放映（Shift+F5）"><Play size={15} />从当前页开始</button>
         </RibbonGroup>}
+        {tab==='视图' && <>
+          <RibbonGroup label="演示视图"><button type="button" className="slides-large-tool" aria-pressed={view==='normal'} onClick={()=>setView('normal')}><GalleryHorizontalEnd size={21}/>普通视图</button>
+            <button type="button" className="slides-large-tool" aria-pressed={view==='sorter'} onClick={()=>setView('sorter')}><LayoutGrid size={21}/>幻灯片浏览</button></RibbonGroup>
+          <RibbonGroup label="显示"><div className="slides-tool-stack">
+            <label><input type="checkbox" disabled={view==='sorter'} checked={showThumbs} onChange={e=>setShowThumbs(e.target.checked)}/>缩略图窗格</label>
+            <label><input type="checkbox" disabled={view==='sorter'} checked={showGrid} onChange={e=>setShowGrid(e.target.checked)}/>网格线</label></div>
+            <label><input type="checkbox" disabled={view==='sorter'} checked={showNotes} onChange={e=>setShowNotes(e.target.checked)}/>备注</label></RibbonGroup>
+          {view==='normal' && <SlideZoomTools zoom={zoom} setZoom={setZoom}/>}
+        </>}
       </div>}
-      {panel==='transition' && <div className="slides-panel" aria-label="当前页切换">
+      {panel==='transition' && <div className="slides-toolbar ribbon-panel" aria-label="当前页切换"><RibbonGroup label="切换效果">
         <label>效果<select aria-label="切换效果" value={transition.effect} onChange={e=>setTransition({effect:e.target.value})}>{Object.entries(transitionNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
         <label>速度<select aria-label="切换速度" value={transition.speed} disabled={transition.effect!=='fade'} onChange={e=>setTransition({speed:e.target.value})}>{Object.entries(speedNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
-        <label><input type="checkbox" checked={transition.click} onChange={e=>setTransition({click:e.target.checked})}/>单击换页</label>
+        </RibbonGroup><RibbonGroup label="换片方式"><label><input type="checkbox" checked={transition.click} onChange={e=>setTransition({click:e.target.checked})}/>单击换页</label>
         <label><input type="checkbox" checked={transition.afterMs!=null} onChange={e=>setTransition({afterMs:e.target.checked?5000:null})}/>定时换页</label>
         {transition.afterMs!=null && <label>停留秒数<input type="number" aria-label="停留秒数" min="0" max="86400" step=".1" key={selected.id+'-'+transition.afterMs} defaultValue={transition.afterMs/1000}
           onBlur={e=>{ if(e.target.checkValidity() && Number.isFinite(e.target.valueAsNumber)) setTransition({afterMs:e.target.valueAsNumber*1000}); else e.target.value=transition.afterMs/1000 }}
           onKeyDown={e=>{if(e.key==='Enter') e.currentTarget.blur()}}/></label>}
-        <button onClick={()=>save({...deck,slides:deck.slides.map(s=>({...s,transition}))})}>应用到全部幻灯片</button>
+        </RibbonGroup><RibbonGroup label="应用"><button onClick={()=>save({...deck,slides:deck.slides.map(s=>({...s,transition}))})}>应用到全部幻灯片</button>
         <IconAction icon={X} label="关闭切换设置" onClick={()=>{setPanel('');setTab('开始')}}/>
-      </div>}
-      {currentShape && <ShapeProperties shape={currentShape} shapes={shapes} select={selectShape} edit={patch=>editShape(shapeId,patch)}
+      </RibbonGroup></div>}
+      {currentShape && ['开始','插入'].includes(tab) && view==='normal' && <ShapeProperties shape={currentShape} shapes={shapes} select={selectShape} edit={patch=>editShape(shapeId,patch)}
         reorder={direction=>changeSlide(selected.id,{shapes:moveSlide(shapes,shapes.indexOf(currentShape),direction)})}
         duplicate={()=>insertShape(currentShape)} remove={()=>{if(changeSlide(selected.id,{shapes:shapes.filter(s=>s.id!==shapeId)}))setShapeId(null)}}/>}
-      {currentBox && <div className="slides-panel slides-box-properties" aria-label="文本框属性">
+      {currentBox && ['开始','插入'].includes(tab) && view==='normal' && <div className="slides-panel slides-box-properties" aria-label="文本框属性">
         <select aria-label="选中文本框" value={boxId} onChange={e=>setBoxId(e.target.value)}>{freeBoxes.map((b,i)=>
           <option key={b.id} value={b.id}>{i+1}. {b.text.slice(0,14) || '空文本框'}</option>)}</select>
-        {Object.entries({x:'左',y:'上',w:'宽',h:'高',fontSize:'字号'}).map(([key,label]) => {
-          const isSize = key === 'fontSize', scale = isSize ? 1 : 100
-          const value = Number((currentBox[key]*scale).toFixed(1))
+        {Object.entries({x:'左',y:'上',w:'宽',h:'高'}).map(([key,label]) => {
+          const value = Number((currentBox[key]*100).toFixed(1))
           return <label key={key}>{label}<input type="number" aria-label={'文本框'+label}
-            key={currentBox.id + ':' + value} defaultValue={value} step={isSize ? 1 : .5}
-            min={isSize ? 6 : key === 'w' || key === 'h' ? 4 : 0} max={isSize ? 144 : 100}
-            onBlur={e => { const next=e.target.valueAsNumber; if (Number.isFinite(next)) editBox(boxId,{[key]:next/scale}); e.target.value=String(value) }}
-            onKeyDown={e => { if(e.key === 'Enter') e.currentTarget.blur() }} />{isSize ? 'pt' : '%'}</label>
+            key={currentBox.id + ':' + value} defaultValue={value} step=".5"
+            min={key === 'w' || key === 'h' ? 4 : 0} max="100"
+            onBlur={e => { const next=e.target.valueAsNumber; if (Number.isFinite(next)) editBox(boxId,{[key]:next/100}); e.target.value=String(value) }}
+            onKeyDown={e => { if(e.key === 'Enter') e.currentTarget.blur() }} />%</label>
         })}
-        <label>字色<input aria-label="文本框字色" type="color" value={'#'+currentBox.color} onChange={e=>editBox(boxId,{color:e.target.value.slice(1)})}/></label>
-        <label>字体<select aria-label="文本框字体" value={currentBox.fontFace || 'Microsoft YaHei'} onChange={e=>editBox(boxId,{fontFace:e.target.value})}>
-          {[...new Set([currentBox.fontFace || 'Microsoft YaHei','Microsoft YaHei','SimSun','KaiTi','Aptos','Arial','Calibri','Georgia','Times New Roman'])].map(f=><option key={f}>{f}</option>)}</select></label>
-        <button aria-pressed={!!currentBox.bold} onClick={()=>editBox(boxId,{bold:!currentBox.bold})}>加粗</button>
-        <button aria-pressed={!!currentBox.italic} onClick={()=>editBox(boxId,{italic:!currentBox.italic})}>斜体</button>
-        <select aria-label="文本框对齐" value={currentBox.align || 'left'} onChange={e=>editBox(boxId,{align:e.target.value})}><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select>
         <button onClick={()=>{if(changeSlide(selected.id,{textBoxes:freeBoxes.filter(b=>b.id!==boxId)})) setBoxId(null)}}>删除文本框</button>
         <IconAction icon={X} label="收起文本框属性" onClick={()=>setBoxId(null)} />
       </div>}
@@ -365,8 +388,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       {panel === 'import' && <div className="slides-panel"><span>按原页序追加文本、常用形状、备注和每页首张 PNG / JPEG。导入采用本地版式，可识别的对象动画会进入动画面板；组合及媒体会简化。</span>
         <button type="button" disabled={busy} onClick={importFile}>选择 PPTX 文件</button><IconAction icon={X} label="关闭导入" onClick={() => setPanel('')} /></div>}
       {error && <p className="slides-error" role="alert">{error}</p>}
-      <div className="slides-layout">
-        <aside className="slides-outline" aria-label="幻灯片列表">
+      <div className={'slides-layout'+(view==='sorter'?' slides-sorter':'')+(!showThumbs?' slides-no-thumbs':'')}>
+        {(view==='sorter' || showThumbs) && <aside className="slides-outline" aria-label="幻灯片列表">
           <div className="slides-list-actions">
             <IconAction icon={Copy} label="复制当前幻灯片" onClick={() => insert(true)} />
             <IconAction icon={ArrowUp} label="上移当前幻灯片" disabled={!index} onClick={() => save({ ...deck, slides: moveSlide(deck.slides, index, -1) })} />
@@ -375,13 +398,16 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
           </div>
           {deleted && <button className="slides-undo" type="button" onClick={undoRemoval}>撤销删除</button>}
           {deck.slides.map((s, i) => <button type="button" className="slides-thumbnail" key={s.id} aria-current={index === i ? 'page' : undefined}
-            onClick={() => setActiveId(s.id)} aria-label={'第 ' + (i + 1) + ' 页 ' + (s.title || '未命名')}>
+            onClick={() => setActiveId(s.id)} onDoubleClick={()=>setView('normal')}
+            onKeyDown={e=>{if(view==='sorter' && e.key==='Enter'){e.preventDefault();setActiveId(s.id);setView('normal')}}}
+            aria-label={'第 ' + (i + 1) + ' 页 ' + (s.title || '未命名')}>
             <div className="slides-mini" aria-hidden="true"><SlidePage theme={theme} slide={s}/></div>
             <span className="slides-number">{i + 1}</span>
           </button>)}
-        </aside>
-        <div className="slides-workarea">
-          <div className="slides-canvas"><SlidePage theme={theme} slide={selected} edit={patch => changeSlide(selected.id, patch)}
+        </aside>}
+        {view==='normal' && <div className="slides-workarea">
+          <div className={'slides-canvas'+(showGrid?' slides-grid':'')} style={{width:zoom+'%',maxWidth:(1180*zoom/100)+'px'}}><SlidePage theme={theme} slide={selected} edit={patch => changeSlide(selected.id, patch)}
+            onFieldSelect={selectField}
             onImage={() => imageInput.current.click()} boxId={boxId} onBoxSelect={selectBox} onBoxEdit={editBox}
             shapeId={shapeId} onShapeSelect={selectShape} onShapeEdit={editShape} /></div>
           {selected.layout === 'image' && selected.image && <div className="slides-image-tools">
@@ -389,9 +415,9 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
             <button type="button" onClick={() => changeSlide(selected.id, { image: null })}>移除插图</button>
           </div>}
           <input type="file" ref={imageInput} hidden accept="image/jpeg,image/png" aria-label="选择幻灯片插图" onChange={setImage} />
-          <label className="slides-notes">演讲者备注<textarea aria-label="演讲者备注" placeholder="为当前页添加演讲提示…" value={selected.notes}
-            onChange={e => changeSlide(selected.id, { notes: e.target.value })} /></label>
-        </div>
+          {showNotes && <label className="slides-notes">演讲者备注<textarea aria-label="演讲者备注" placeholder="为当前页添加演讲提示…" value={selected.notes}
+            onChange={e => changeSlide(selected.id, { notes: e.target.value })} /></label>}
+        </div>}
       </div>
     </>}
     {printing && createPortal(<div className="slides-print" aria-hidden="true">

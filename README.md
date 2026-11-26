@@ -2,7 +2,9 @@
 
 砚页是一款面向 Windows 的开源本地办公软件。名字取自砚台与书页。你可以在同一棵页面树里写 Markdown、算预算、排项目进度、画流程，再把文档大纲整理成演示文稿。
 
-**0.8.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+**0.9.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，再选「电子文档」，即可断网写作。电子文档自动保存到本机。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[Windows 安装与下载](https://github.com/ZhaoZan010903/yanye-office/releases/tag/v0.9.0) · [产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+
+新版将文字、表格、演示的文件菜单、保存按钮和选项卡放在同一行。文字新增目录、脚注、尾注及按节排版工具；表格可设置打印区域与标题、编辑单元格批注；演示的对象字体、段落、排列和动画可随 PPTX 保存。[三种工作区实机截图、支持范围与原生回读](docs/OFFICE_RIBBON.md)
 
 ![砚页文件中心的新建入口、最近文件与本地目录](docs/files.png)
 

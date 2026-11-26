@@ -1,4 +1,5 @@
 import { bounds, evaluator, filterRow, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
+import { readPageSetup } from './sheet-page.js'
 
 export const exchangeNote = 'XLSX 支持值、公式、常用样式、冻结、验证、数值条件格式、按值筛选、分组柱形或条形图，以及多级行、单列字段、单值字段和切片器的数据透视表。日期转为文本。含复杂图形或外部连接的模板请保留原件。XLSM 从文件中心按原包保存。CSV 导出当前表的计算结果。'
 const formatByCode = new Map(Object.entries(numberFormats).map(([key,[,code]])=>[code,key]))
@@ -77,6 +78,18 @@ export async function readXlsx(base64) {
     if (ws.rowCount > LIMITS.rows || ws.columnCount > LIMITS.cols) throw new Error('单表最多 5000 行、128 列。')
     const sheet = newSheet(ws.name)
     const native=rules.get(ws.name)
+    sheet.pageSetup=readPageSetup(ws.pageSetup)
+    if (native?.areas) sheet.pageSetup.areas=native.areas
+    if (native?.notes) {
+      sheet.notes=native.notes
+      for (const [ref,note] of Object.entries(sheet.notes)) {
+        const pos=location(ref), rich=ws.getCell(ref).note
+        sheet.rows=Math.max(sheet.rows,pos.row+1)
+        sheet.cols=Math.max(sheet.cols,pos.col+1)
+        if (typeof rich==='object' && rich?.texts?.map(run=>run.text).join('')===note.text) note.rich=rich
+      }
+    }
+    if (ws.views?.[0]?.showGridLines === false) sheet.showGridLines=false
     if (native?.validations?.length) sheet.validations=native.validations
     if (native?.autoFilter) sheet.autoFilter=native.autoFilter
     if (native?.chart) sheet.chart=native.chart
@@ -125,6 +138,7 @@ export async function readXlsx(base64) {
       if (cell.fill?.pattern === 'solid' && rgb(cell.fill.fgColor)) style.fill = rgb(cell.fill.fgColor)
       if (['left','center','right'].includes(cell.alignment?.horizontal)) style.align = cell.alignment.horizontal
       if(cell.alignment?.indent>0) style.indent=cell.alignment.indent
+      if(cell.alignment?.wrapText) style.wrap=true
       if (['top','middle','bottom'].includes(cell.alignment?.vertical)) style.vertical = cell.alignment.vertical
       if (cell.border && Object.values(cell.border).some(side=>side?.style)) style.borders = cell.border
       if (Object.keys(style).length) (sheet.styles ??= {})[ref] = style
@@ -162,6 +176,11 @@ export async function writeXlsx(book) {
   const display = evaluator(book)
   for (const sheet of book.sheets) {
     const ws = workbook.addWorksheet(sheet.name)
+    if (sheet.pageSetup) {
+      const {areas,printTitlesRow,printTitlesColumn,...settings}=sheet.pageSetup
+      Object.assign(ws.pageSetup,settings)
+    }
+    for (const [ref,note] of Object.entries(sheet.notes ?? {})) ws.getCell(ref).note=note.rich || note.text
     if (sheet.validations?.length) ws.dataValidations.add('A1',{type:'any',formulae:[]})
     for (const group of sheet.conditions??[]) ws.addConditionalFormatting(structuredClone(group))
     if (sheet.autoFilter) {
@@ -174,7 +193,10 @@ export async function writeXlsx(book) {
     }
     for (const [index,height] of Object.entries(sheet.heights ?? {})) ws.getRow(Number(index)+1).height=height
     for (const [index,width] of Object.entries(sheet.widths ?? {})) ws.getColumn(Number(index)+1).width=width
-    if (sheet.freezeColumn || sheet.freezeHeader) ws.views = [{state:'frozen', xSplit:sheet.freezeColumn ? 1 : 0, ySplit:sheet.freezeHeader ? 1 : 0}]
+    if (sheet.freezeColumn || sheet.freezeHeader || sheet.showGridLines===false) ws.views = [{
+      ...(sheet.freezeColumn || sheet.freezeHeader ? {state:'frozen',xSplit:sheet.freezeColumn?1:0,ySplit:sheet.freezeHeader?1:0} : {state:'normal'}),
+      showGridLines:sheet.showGridLines!==false,
+    }]
     for (const box of sheet.merges ?? []) ws.mergeCells(rangeName(box))
     for (const [ref,raw] of Object.entries(sheet.cells)) {
       const cell = ws.getCell(ref)
@@ -199,7 +221,8 @@ export async function writeXlsx(book) {
         ...(style.size ? {size:style.size} : {}),
       }
       if (style.fill) cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:argb(style.fill)}}
-      if (style.align || style.vertical || style.indent) cell.alignment = {...(style.align ? {horizontal:style.align} : {}),...(style.vertical ? {vertical:style.vertical} : {}),...(style.indent ? {indent:style.indent}: {})}
+      if (style.align || style.vertical || style.indent || style.wrap) cell.alignment = {...(style.align ? {horizontal:style.align} : {}),
+        ...(style.vertical ? {vertical:style.vertical} : {}),...(style.indent ? {indent:style.indent}: {}),...(style.wrap ? {wrapText:true}: {})}
       if (style.borders) cell.border = style.borders
     }
   }

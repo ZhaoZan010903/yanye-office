@@ -1,7 +1,9 @@
 import React, { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronUp, MoreHorizontal, Replace, Star } from 'lucide-react'
 import { officeKinds, MAX_TITLE_LENGTH } from '../shared/workspace.mjs'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
+import { RibbonDisclosure } from './office/RibbonDisclosure'
 import './office.css'
 
 const OriginalReplaceDialog = lazy(() => import('./original-replace-dialog.jsx'))
@@ -46,7 +48,7 @@ class OfficeContentBoundary extends React.Component {
   }
 }
 
-export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit, onMenu, onFavorite }) {
+export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit, onMenu, onFavorite, fileControls, tabToolsHost }) {
   const titleRef = useRef(null)
   const format = formats[page.kind]
   const [replaceOpen, setReplaceOpen] = useState(false)
@@ -67,11 +69,12 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
     if (focusTitle) { titleRef.current?.focus(); titleRef.current?.select() }
   }, [focusTitle])
   const Editor = page.kind==='spreadsheet' && page.content?.preserved ? PreservedWorkbook : editors[page.kind]
-  return <section className={'office-page type-'+(format || page.kind)} data-ribbon-hidden={collapsed} aria-label={officeKinds[page.kind]}>
-    <header className="office-heading">
-      <PageIcon page={page} size={24} />
-      <input ref={titleRef} aria-label="页面标题" maxLength={MAX_TITLE_LENGTH} value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
-        placeholder="未命名页面" onChange={e => onEdit({ title: e.target.value })} />
+  const hasOfficeRibbon = fileControls && Editor !== PreservedWorkbook
+  const heading = <header className="office-heading">
+      {!hasOfficeRibbon && fileControls}
+      {!tabToolsHost && <><PageIcon page={page} size={24} />
+        <input ref={titleRef} aria-label="页面标题" maxLength={MAX_TITLE_LENGTH} value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
+          placeholder="未命名页面" onChange={e => onEdit({ title: e.target.value })} /></>}
       {['docx','xlsx','pptx'].includes(page.disk?.extension) && <button type="button" className="office-workspace-command" disabled={page.disk.dirty}
         title={page.disk.dirty ? '当前有未写入的修改。可在文件中心对磁盘原件操作。' : '在磁盘原件中查找并替换，保存独立副本'}
         onClick={() => setReplaceOpen(true)}><Replace size={15}/>保留版式替换</button>}
@@ -80,7 +83,10 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
       <IconButton icon={Star} label={page.favorite ? '取消收藏' : '收藏页面'} onClick={onFavorite} aria-pressed={page.favorite} />
       <IconButton icon={MoreHorizontal} label="页面操作" onClick={onMenu} />
     </header>
+  return <section className={'office-page type-'+(format || page.kind)} data-ribbon-hidden={collapsed} aria-label={officeKinds[page.kind]}>
+    {tabToolsHost ? createPortal(heading,tabToolsHost) : heading}
     <div className="office-editor">
+      <RibbonDisclosure.Provider value={hasOfficeRibbon ? {collapsed, setCollapsed, fileBar:fileControls} : null}>
       <OfficeContentBoundary page={page}>
       <Suspense fallback={<p role="status">正在打开{officeKinds[page.kind]}…</p>}>
         <Editor value={page.content} title={page.title} disk={page.disk} onChange={content => onEdit({ content })}
@@ -88,6 +94,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
           onImport={window.yanye.importFile} onExport={window.yanye.exportFile} onPrintPdf={window.yanye.printPdf} />
       </Suspense>
       </OfficeContentBoundary>
+      </RibbonDisclosure.Provider>
     </div>
     {replaceOpen && <Suspense fallback={null}><OriginalReplaceDialog disk={page.disk} onClose={()=>setReplaceOpen(false)}/></Suspense>}
     <footer className="status-bar">

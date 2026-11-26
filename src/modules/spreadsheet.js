@@ -250,21 +250,23 @@ function translateFormula(raw, dr, dc) {
 export function copyRange(sheet, rows, left, right) {
   return rows.map(row => Array.from({length:right-left+1},(_,i) => {
     const col=left+i, ref=address(row,col)
-    return {row,col,raw:sheet.cells[ref] ?? '',style:sheet.styles?.[ref],format:sheet.formats?.[ref]}
+    return {row,col,raw:sheet.cells[ref] ?? '',style:sheet.styles?.[ref],format:sheet.formats?.[ref],note:sheet.notes?.[ref]}
   }))
 }
 
 export function pasteRange(sheet, row, col, clipboard) {
-  const formats = {...sheet.formats}, styles = {...sheet.styles}
+  const formats = {...sheet.formats}, styles = {...sheet.styles}, notes = {...sheet.notes}
   const matrix = clipboard.map((line,i) => line.map((cell,j) => {
     const ref = address(row+i,col+j)
     if (cell.format) formats[ref]=cell.format
     else delete formats[ref]
     if (cell.style) styles[ref]=cell.style
     else delete styles[ref]
+    if (cell.note) notes[ref]=cell.note
+    else delete notes[ref]
     return translateFormula(cell.raw,row+i-cell.row,col+j-cell.col)
   }))
-  return {...writeRange(sheet,row,col,matrix),formats,styles}
+  return {...writeRange(sheet,row,col,matrix),formats,styles,notes}
 }
 
 export function fillFrom(sheet, row, col, direction) {
@@ -326,7 +328,7 @@ export function shiftGrid(book, id, axis, index, delta) {
   }).map(sheet => {
     if (sheet.id !== id) return sheet
     const shifted = { ...sheet, [size]: sheet[size] + delta }
-    for (const field of ['formats','styles']) {
+    for (const field of ['formats','styles','notes']) {
       if (!sheet[field]) continue
       shifted[field] = {}
       for (const [ref,format] of Object.entries(sheet[field])) {
@@ -343,6 +345,18 @@ export function shiftGrid(book, id, axis, index, delta) {
       return next
     }
     if (sheet.merges) shifted.merges=sheet.merges.map(shiftBox).filter(box=>box && (box.top!==box.bottom || box.left!==box.right))
+    if (sheet.pageSetup) {
+      const page=shifted.pageSetup={...sheet.pageSetup}
+      if (page.areas) page.areas=page.areas.map(shiftBox).filter(Boolean)
+      const key=axis==='row'?'printTitlesRow':'printTitlesColumn'
+      if (page[key]) {
+        const [first,last] = page[key].split(':')
+        const box = axis==='row' ? parseRange('A'+first+':A'+last) : parseRange(first+'1:'+last+'1')
+        const next=box && shiftBox(box)
+        if (!next) delete page[key]
+        else page[key]=axis==='row' ? (next.top+1)+':'+(next.bottom+1) : columnName(next.left)+':'+columnName(next.right)
+      }
+    }
     if (sheet.validations) shifted.validations=sheet.validations.flatMap(rule=>{
       const box=shiftBox(rule.box)
       return box?[{...rule,box}]:[]

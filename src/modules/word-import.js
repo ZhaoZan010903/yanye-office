@@ -2,6 +2,9 @@ import { defaultLayout, highlights, maxImageBytes, papers, validColor, validFont
 import { bandTypes, pageTypes, readBand } from './word-bands.js'
 import {nativeSectionProperties} from './word-section-xml.js'
 import {readComments} from './word-comments.js'
+import {defaultTextFromStyles} from './word-default-fonts.js'
+import {readNoteParts,readToc} from './word-references.js'
+import {bookmarkAnchor,bookmarkNames,paragraphFields,validBookmark,joinReferenceResults} from './word-bookmarks.js'
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -132,8 +135,21 @@ export async function readDocx(base64) {
   }
   const main = await xml('word/document.xml'), body=child(main,'body')
   if (!body) throw new Error('文件中未发现 Word 文档正文。')
+  const background = child(main,'background')
+  const pageColor = '#'+(attr(background,'color') || '')
+  if (background && (background.children.length || attr(background,'themeColor'))) warnings.add('页面主题色、图片或纹理背景只预览基础底色')
   const relations = await xml('word/_rels/document.xml.rels')
   const targets = new Map(all(relations,'Relationship').map(r=>[r.getAttribute('Id'),r]))
+  function partFor(kind,fallback) {
+    const part=[...targets.values()].find(r=>r.getAttribute('Type')===R+'/'+kind)
+    if (!part) return xml(fallback)
+    if (part.getAttribute('TargetMode')==='External') return null
+    const url=new URL(part.getAttribute('Target'),'https://local.invalid/word/document.xml')
+    return url.origin==='https://local.invalid' ? xml(decodeURIComponent(url.pathname.slice(1))) : null
+  }
+  const noteParts=await readNoteParts(targets,xml)
+  const bookmarkIndex=bookmarkNames(body)
+  let anchorCount=0
   const commentsRel=[...targets.values()].find(r=>r.getAttribute('Type')===R+'/comments' && r.getAttribute('TargetMode')!=='External')
   let comments=new Map()
   if(commentsRel) {
@@ -153,7 +169,7 @@ export async function readDocx(base64) {
       return {ordered:fmt!=='bullet',start:Number(val(child(override,'startOverride')) || val(child(lvl,'start')) || 1)}
     })
   }
-  const styles = await xml('word/styles.xml')
+  const styles = await partFor('styles','word/styles.xml')
   const headings = new Map()
   for (const style of all(styles,'style')) {
     const level = val(child(child(style,'pPr'),'outlineLvl'))
@@ -196,6 +212,8 @@ export async function readDocx(base64) {
     return {type:level?'heading':'paragraph',attrs}
   }
   async function parseParagraph(p) {
+    const fields=paragraphFields(p)
+    if(fields.guarded)bookmarkIndex.protectedFields=true
     const ends=new Set(all(p,'commentRangeEnd').map(el=>attr(el,'id')))
     const activeComments=new Set()
     const pr=child(p,'pPr'), {type,attrs}=paragraphFormat(pr)
@@ -217,6 +235,13 @@ export async function readDocx(base64) {
       if (depth>48) throw new Error('文档元素嵌套过深。')
       for (const part of el.children) {
         const name=part.localName
+        if(fields.replacements.has(part)){inline.push(fields.replacements.get(part));continue}
+        if(fields.skip.has(part))continue
+        if(name==='bookmarkStart' || name==='bookmarkEnd'){
+          const marker=bookmarkAnchor(part,bookmarkIndex)
+          if(marker){inline.push(marker);anchorCount++}
+          continue
+        }
         if(name==='commentRangeStart' || name==='commentRangeEnd') {
           const id=attr(part,'id')
           if(name==='commentRangeEnd') activeComments.delete(id)
@@ -237,15 +262,19 @@ export async function readDocx(base64) {
         } else if (name==='drawing') {
           const n=await image(part); if(n) inline.push(n)
         } else if (name==='hyperlink') {
-          const rel=targets.get(part.getAttributeNS(R,'id')), href=rel?.getAttribute('Target')
-          await walk(part,href && /^(https?:\/\/|mailto:)/i.test(href)?[...marks,{type:'link',attrs:{href}}]:marks,depth+1)
+          const rel=targets.get(part.getAttributeNS(R,'id')), anchor=attr(part,'anchor'), href=rel?.getAttribute('Target') || (validBookmark(anchor)?'#'+anchor:null)
+          await walk(part,href && /^(https?:\/\/|mailto:|#)/i.test(href)?[...marks,{type:'link',attrs:{href}}]:marks,depth+1)
         } else if (name==='ins' || name==='del') {
           const revision={type:'wordRevision',attrs:revisionInfo(part)}
           await walk(part,[...marks,revision],depth+1)
         } else if (['smartTag','sdt','sdtContent','fldSimple'].includes(name)) {
           warnings.add('域或内容控件已转换为正文')
           await walk(part,marks,depth+1)
-        } else if (['del','pict','object','instrText','footnoteReference','endnoteReference'].includes(name)) warnings.add('部分审阅标记、域或嵌入对象已略过')
+        } else if (name==='footnoteReference' || name==='endnoteReference') {
+          const note=noteParts.notes.get(name.replace('Reference','')+':'+attr(part,'id'))
+          if(note) inline.push({type:'wordNote',attrs:note})
+          else noteParts.protectedNotes=true
+        } else if (['del','pict','object','instrText'].includes(name)) warnings.add('部分审阅标记、域或嵌入对象已略过')
       }
     }
     await walk(p)
@@ -255,7 +284,26 @@ export async function readDocx(base64) {
   async function blocks(container, depth=0) {
     if (depth>12) throw new Error('文档表格嵌套过深。')
     const entries=[]
-    for (const el of container.children) {
+    if(joinReferenceResults(container))bookmarkIndex.protectedFields=true
+    const siblings=[...container.children]
+    for (let i=0;i<siblings.length;i++) {
+      const el=siblings[i]
+      const toc=readToc(siblings,i)
+      if(toc) {
+        if(toc.protected) {bookmarkIndex.protectedFields=true;warnings.add('自定义目录或与正文共用段落的目录需要保留原版式')}
+        for(const p of siblings.slice(i,toc.end+1)) {
+          for(const el of all(p,'*').filter(n=>n.localName==='bookmarkStart' || n.localName==='bookmarkEnd')) {
+            const side=(el.compareDocumentPosition(toc.first)&4)?'before':(el.compareDocumentPosition(toc.last)&2)?'after':null
+            if(!side)continue
+            const mark=bookmarkAnchor(el,bookmarkIndex)
+            if(mark) {(toc.node.attrs[side]??=[]).push(mark.attrs);anchorCount++}
+          }
+        }
+        entries.push({node:toc.node});i=toc.end
+        const section=child(child(siblings[i],'pPr'),'sectPr')
+        if(depth===0 && section)entries.push({node:{type:'sectionBreak',attrs:{layout:await readSection(section)}}})
+        continue
+      }
       if (el.localName==='p') {
         entries.push(...await parseParagraph(el))
         const section=child(child(el,'pPr'),'sectPr')
@@ -289,7 +337,8 @@ export async function readDocx(base64) {
     }
     return organizeLists(entries,numbers)
   }
-  const settings=await xml('word/settings.xml')
+  const settings=await partFor('settings','word/settings.xml')
+  const textDefaults=defaultTextFromStyles(styles,await partFor('theme','word/theme/theme1.xml'),settings)
   let bandRevisions=false
   async function readSection(section) {
     const layout={...defaultLayout}, size=child(section,'pgSz'), margins=child(section,'pgMar')
@@ -335,14 +384,17 @@ export async function readDocx(base64) {
   }
   const layout=await readSection(child(body,'sectPr'))
   const content=await blocks(body)
+  if(anchorCount!==all(body,'bookmarkStart').length+all(body,'bookmarkEnd').length)bookmarkIndex.protectedFields=true
+  if(bookmarkIndex.protectedFields)warnings.add('特殊域或书签需使用保留原版式模式写回')
   const protectedRevisions=bandRevisions || structuralChanges.some(tag=>all(body,tag).some(el=>tag!=='pPrChange' || !editablePreviousFormat(el))) ||
     [...all(body,'ins'),...all(body,'del')].some(el=>!editableRevision(el) && !editableBreak(el))
   if (protectedRevisions) {
     warnings.add('格式和结构修订需要保留原版式文件')
   }
-  if (Object.keys(zip.files).some(p=>/word\/(?:footnotes|endnotes|charts|embeddings|vbaProject)/i.test(p))) warnings.add('脚注、尾注或嵌入部件未参与转换')
+  if(noteParts.protectedNotes) warnings.add('复杂注释需使用保留原版式模式写回')
+  if (Object.keys(zip.files).some(p=>/word\/(?:charts|embeddings|vbaProject)/i.test(p))) warnings.add('图表或嵌入部件未参与转换')
   const extended=await xml('word/commentsExtended.xml')
   if(extended && all(extended,'commentEx').some(el=>[...el.attributes].some(a=>a.localName==='paraIdParent' || (a.localName==='done' && ['true','1'].includes(a.value))))) warnings.add('批注回复与解决状态需要保留原版式文件')
   if(comments.size!==anchored.size || all(body,'commentReference').some(el=>!anchored.has(attr(el,'id')))) warnings.add('跨段、点状或对象批注请使用保留原版式打开')
-  return wordValue({layout,protectedRevisions,trackChanges:Boolean(flag(child(settings,'trackRevisions'))),doc:{type:'doc',content:content.length?content:[paragraph()]},compatibility:[...warnings]})
+  return wordValue({layout,textDefaults,pageColor,protectedRevisions,protectedFields:bookmarkIndex.protectedFields,protectedNotes:noteParts.protectedNotes,trackChanges:Boolean(flag(child(settings,'trackRevisions'))),doc:{type:'doc',content:content.length?content:[paragraph()]},compatibility:[...warnings]})
 }

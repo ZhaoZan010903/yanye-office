@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { shapeKinds, slideShape } from './slides-model.js'
+import { shapeKinds, slideShape, slideTextStyle } from './slides-model.js'
 import SlideParagraphs from './SlideParagraphs.jsx'
 
 const polygons = {triangle:'50,0 100,100 0,100',diamond:'50,0 100,50 50,100 0,50',rightArrow:'0,25 60,25 60,0 100,50 60,100 60,75 0,75'}
@@ -8,8 +8,7 @@ export function SlideShape({ shape, selected, onSelect, onMove,split }) {
   const drag = useRef(null), [preview,setPreview] = useState(null)
   const box = preview || shape
   const style = { left:box.x*100+'%', top:box.y*100+'%', width:box.w*100+'%', height:box.h*100+'%',
-    transform:'rotate('+box.rotation+'deg)',color:'#'+box.color,fontSize:box.fontSize/9.6+'cqw',fontFamily:box.fontFace,
-    fontStyle:box.italic?'italic':undefined,fontWeight:box.bold?600:400 }
+    transform:'rotate('+box.rotation+'deg)', ...slideTextStyle({...box,align:box.shapeTextAlign || 'center'}) }
   function position(e) {
     const {x,y,width,height,screenX,screenY} = drag.current
     return slideShape({...shape,x:x+(e.clientX-screenX)/width,y:y+(e.clientY-screenY)/height})
@@ -39,7 +38,7 @@ export function SlideShape({ shape, selected, onSelect, onMove,split }) {
       if(x!==shape.x || y!==shape.y) onMove({x,y})
     }} onLostPointerCapture={()=>{drag.current=null;setPreview(null)}}>
     <svg viewBox="0 0 100 100" aria-hidden="true" preserveAspectRatio="none" fill={'#'+shape.fill} stroke={'#'+shape.stroke}>{element}</svg>
-    <span><SlideParagraphs text={shape.text} split={split}/></span>
+    <span className="slide-shape-text"><SlideParagraphs text={shape.text} split={split}/></span>
   </div>
 }
 

@@ -1,4 +1,4 @@
-import { newSlide, shapeKinds, slideBoxes, slideShape, slideThemes, textBox } from './slides-model.js'
+import { fieldFormat, newSlide, shapeKinds, slideBoxes, slideShape, slideThemes, textBox } from './slides-model.js'
 import { readTiming, slideTargets, writeTiming } from './slide-animations.js'
 import { parseTransition, transitionXml } from './slide-transition.js'
 
@@ -8,6 +8,24 @@ const ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 function pageBox(box) {
   return { x: box.x * W, y: box.y * H, w: box.w * W, h: box.h * H }
+}
+
+function pptText(format) {
+  return { fontSize:format.fontSize, fontFace:format.fontFace, color:format.color, bold:format.bold,
+    italic:format.italic, underline:format.underline ? {style:'sng'} : undefined,
+    strike:format.strike ? 'sngStrike' : undefined, align:format.align, lineSpacingMultiple:format.lineSpacing }
+}
+
+// PptxGenJS writes only the point size on a paragraph mark. In WPS and
+// PowerPoint this makes typing at a formatted line end revert to the theme.
+// Our editor applies a single format to the whole object, including empty lines.
+function formatParagraphMarks(xml) {
+  return xml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, body=>{
+    const run=body.match(/<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>/)?.[0]
+    if (!run) return body
+    const mark=run.replace('<a:rPr','<a:endParaRPr').replace('</a:rPr>','</a:endParaRPr>')
+    return body.replace(/<a:endParaRPr\b[^>]*\/>/g,()=>mark)
+  })
 }
 
 export async function exportPptx(deck, name) {
@@ -23,16 +41,11 @@ export async function exportPptx(deck, name) {
     slide.background = { color: theme.background }
     const boxes = slideBoxes(item.layout)
     const baseText = { fontFace: 'Microsoft YaHei', color: theme.ink, margin: 0, valign: 'top', fit: 'shrink', breakLine: false }
-    const addText = (field, options) => slide.addText(item[field] || '', {
-      ...baseText, ...pageBox(boxes[field]), ...options, objectName: 'YanYe ' + item.layout + ' ' + field,
-    })
-    if (item.titleBox) {
-      const box=item.titleBox
-      slide.addText(item.title || '',{...baseText,...pageBox(box),fontSize:box.fontSize,fontFace:box.fontFace,color:box.color,
-        bold:box.bold,italic:box.italic,align:box.align,objectName:'YanYe '+item.layout+' positioned title'})
-    } else addText('title', { fontSize: item.layout === 'cover' ? 46 : 36, bold: true })
-    addText('body', { fontSize: 22 })
-    if (item.layout === 'columns') addText('side', { fontSize: 22 })
+    for (const field of item.layout === 'columns' ? ['title','body','side'] : ['title','body']) {
+      const positioned = field === 'title' && item.titleBox
+      slide.addText(item[field] || '', { ...baseText, ...pageBox(positioned || boxes[field]), ...pptText(fieldFormat(item,field,theme)),
+        objectName: 'YanYe ' + item.layout + (positioned ? ' positioned ' : ' ') + field })
+    }
     if (item.layout === 'image' && item.image) {
       const box = pageBox(boxes.side)
       const image = item.image
@@ -43,24 +56,27 @@ export async function exportPptx(deck, name) {
     if (item.notes) slide.addNotes(item.notes)
     for (const shape of item.shapes || []) {
       slide.addText(shape.text, { ...baseText, ...pageBox(shape), shape:shape.kind, rotate:shape.rotation,
-        fill:{color:shape.fill}, line:{color:shape.stroke,width:1}, color:shape.color, fontSize:shape.fontSize,
-        fontFace:shape.fontFace, bold:shape.bold, italic:shape.italic, align:'center', valign:'middle', objectName:'YanYe shape' })
+        fill:{color:shape.fill}, line:{color:shape.stroke,width:1}, ...pptText(shape),
+        align:shape.shapeTextAlign || 'center', valign:'middle', objectName:'YanYe shape' })
     }
     for (const box of item.textBoxes || []) {
-      slide.addText(box.text, { ...baseText, ...pageBox(box), fontSize: box.fontSize, color: box.color,
-        fontFace:box.fontFace || baseText.fontFace, bold:box.bold, italic:box.italic, align:box.align,
+      slide.addText(box.text, { ...baseText, ...pageBox(box), ...pptText(box),
         fit: undefined, objectName: 'YanYe text box' })
     }
   }
   const effects=deck.slides.map(item=>transitionXml(item.transition || {}))
-  if (!effects.some(Boolean) && !deck.slides.some(s=>s.animations?.length || s.nativeTiming)) return file.write({ outputType:'base64',compression:true })
+  const hasFormatting=deck.slides.map(s=>Boolean(s.fieldFormats || s.titleBox || s.shapes?.length || s.textBoxes?.length))
+  if (!effects.some(Boolean) && !hasFormatting.some(Boolean) && !deck.slides.some(s=>s.animations?.length || s.nativeTiming)) return file.write({ outputType:'base64',compression:true })
   const {default:Zip}=await import('jszip')
   const pack=await Zip.loadAsync(await file.write({ outputType:'uint8array' }))
   for (const [index,effect] of effects.entries()) {
     const item=deck.slides[index]
-    if (!effect && !item.animations?.length && !item.nativeTiming) continue
     const path='ppt/slides/slide'+(index+1)+'.xml'
-    const xml=await pack.file(path).async('string')
+    const hasTiming=Boolean(effect || item.animations?.length || item.nativeTiming)
+    if (!hasTiming && !hasFormatting[index]) continue
+    let xml=await pack.file(path).async('string')
+    if (hasFormatting[index]) xml=formatParagraphMarks(xml)
+    if (!hasTiming) {pack.file(path,xml); continue}
     // Read native IDs from our generated shape tree rather than assuming
     // PowerPoint numbers shapes consecutively.
     const ids=[...xml.matchAll(/<p:(?:sp|pic)>(?:(?!<\/p:(?:sp|pic)>)[\s\S])*?<p:cNvPr\s+id="(\d+)"/g)].map(match=>match[1])
@@ -80,6 +96,32 @@ function nodes(root, tag) {
 function shapeText(shape) {
   return nodes(shape, 'p').map(p => [...p.getElementsByTagName('*')]
     .map(node => node.localName === 't' ? node.textContent : node.localName === 'br' ? '\n' : '').join('')).join('\n')
+}
+
+function readTextFormat(shape) {
+  const paragraph = nodes(shape,'pPr')[0]
+  const props = nodes(shape,'rPr')[0] || nodes(shape,'defRPr')[0] || nodes(shape,'endParaRPr')[0]
+  const format = {}
+  if (props) {
+    const fontFace = nodes(props,'latin')[0]?.getAttribute('typeface') || nodes(props,'ea')[0]?.getAttribute('typeface')
+    if (fontFace && !fontFace.startsWith('+')) format.fontFace=fontFace
+    if (props.hasAttribute('sz')) format.fontSize=Number(props.getAttribute('sz'))/100
+    const color=nodes(props,'srgbClr')[0]?.getAttribute('val')
+    if (color) format.color=color
+    for (const [attribute,key] of [['b','bold'],['i','italic']]) {
+      if (props.hasAttribute(attribute)) format[key]=['1','true'].includes(props.getAttribute(attribute))
+    }
+    if (props.hasAttribute('u')) format.underline=props.getAttribute('u')!=='none'
+    if (props.hasAttribute('strike')) format.strike=props.getAttribute('strike')!=='noStrike'
+  }
+  if (paragraph) {
+    const align=({l:'left',ctr:'center',r:'right',just:'justify'})[paragraph.getAttribute('algn')]
+    if (align) format.align=align
+    const spacing=nodes(paragraph,'lnSpc')[0]
+    const pct=spacing && nodes(spacing,'spcPct')[0]
+    if (pct) format.lineSpacing=Number(pct.getAttribute('val'))/100000
+  }
+  return format
 }
 
 function relationships(doc, source) {
@@ -183,21 +225,16 @@ export async function importPptx(base64) {
       if (!storedTitle && !free && !geometric) return true
       const xf = propsShape && nodes(propsShape,'xfrm')[0], off = xf && nodes(xf,'off')[0], ext = xf && nodes(xf,'ext')[0]
       if (!off || !ext) return true
-      const props = nodes(sp,'rPr')[0] || nodes(sp,'defRPr')[0] || nodes(sp,'endParaRPr')[0]
       const format = { text, x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
         w: Number(ext.getAttribute('cx'))/slideWidth, h: Number(ext.getAttribute('cy'))/slideHeight,
-        fontSize: Number(props?.getAttribute('sz')) / 100 || 22,
-        fontFace:props && nodes(props,'latin')[0]?.getAttribute('typeface'),
-        bold:['1','true'].includes(props?.getAttribute('b')), italic:['1','true'].includes(props?.getAttribute('i')),
-        align:({ctr:'center',r:'right'})[nodes(sp,'pPr')[0]?.getAttribute('algn')] || 'left',
-        color:(props && nodes(props,'srgbClr')[0]?.getAttribute('val')) || slideThemes[theme].ink }
+        color:slideThemes[theme].ink, ...readTextFormat(sp) }
       if (storedTitle || (plainText && !declaredTitle && !positionedTitle)) {
         positionedTitle={sp,box:textBox(format)}
         return true
       }
       if (geometric) {
         const fill=[...propsShape.children].find(el=>el.localName==='solidFill'), line=nodes(propsShape,'ln')[0]
-        geometry.push(slideShape({...format,kind,rotation:Number(xf.getAttribute('rot'))/60000,
+        geometry.push(slideShape({...format,kind,shapeTextAlign:format.align,rotation:Number(xf.getAttribute('rot'))/60000,
           fill:fill && nodes(fill,'srgbClr')[0]?.getAttribute('val'),stroke:line && nodes(line,'srgbClr')[0]?.getAttribute('val')}))
         identify(sp,geometry.at(-1).id)
       } else { const box=textBox(format); boxes.push(box); identify(sp,box.id) }
@@ -216,6 +253,15 @@ export async function importPptx(base64) {
     if (positionedTitle) {
       const {id,text,...format}=positionedTitle.box
       item.titleBox=format
+    }
+    for (const [field,object] of Object.entries({title,body:body || (rest.length===1?rest[0]:null),side})) {
+      if (!object) continue
+      const original = readTextFormat(object.sp)
+      // Exporters often omit b="0" on an unbolded, non-placeholder title.
+      if (field==='title' && ownTitle.test(object.name) && original.bold===undefined) original.bold=false
+      const defaults = fieldFormat(item,field,slideThemes[theme])
+      const overrides = Object.fromEntries(Object.entries(original).filter(([key,val])=>val!==defaults[key]))
+      if (Object.keys(overrides).length) (item.fieldFormats ||= {})[field]=overrides
     }
     if (boxes.length) item.textBoxes = boxes
     const transition=parseTransition(content)

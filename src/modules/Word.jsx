@@ -1,7 +1,9 @@
 import Ribbon, { RibbonGroup } from '../office/Ribbon'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import {DOMSerializer} from '@tiptap/pm/model'
+import {TextSelection} from '@tiptap/pm/state'
 import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
@@ -10,12 +12,23 @@ import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FileDown, Image
 import { findText, highlights, inheritedBands, maxImageBytes, paperDimensions, papers, validColor, validFont, wordValue } from './word-model.js'
 import { pageBand } from './word-bands.js'
 import WordBands from './WordBands.jsx'
+import { WordPageAppearance, WordPageFrame } from './WordPageAppearance.jsx'
+import { useWordDisplay, WordDisplayTools, WritingModeBar } from './WordDisplayTools.jsx'
+import WordOutlineView from './WordOutlineView.jsx'
+import {WordLineControls,WordLineNumbers} from './WordLineNumbers.jsx'
 import WordComments,{WordComment} from './WordComments.jsx'
 import WordRevisions from './WordRevisions.jsx'
-import {currentSection, revisionAction, SectionBreak, WordRevision} from './word-revisions.js'
+import {currentSection, revisionAction, revisions,reviewTransaction, SectionBreak, WordRevision} from './word-revisions.js'
 import {sectionPrintModel} from './word-section-print.js'
 import FontPicker from './FontPicker.jsx'
+import { ClipboardPaste, Copy, Scissors, Paintbrush, Eraser, IndentIncrease, IndentDecrease, AArrowUp, AArrowDown, PanelLeft, Ruler, Grid2X2, BookOpen, FileText, WrapText, Pilcrow, MoveHorizontal } from 'lucide-react'
+import {WordNote,WordToc,WordReferenceTools,WordNoteForm,documentOutline} from './WordReferences.jsx'
+import {MarginInput,WordInsertExtras,WordLinkForm} from './WordRibbonTools.jsx'
+import {noteKinds} from './word-references.js'
+import {WordBookmark,WordCrossRef,WordTextField,WordBookmarkPanel,WordCrossRefTools} from './WordBookmarks.jsx'
+import {bookmarkRanges} from './word-bookmarks.js'
 import './word.css'
+import {standardWordMargins} from '../../shared/word-template.mjs'
 
 const WordStyle = Mark.create({
   name:'wordStyle',
@@ -37,7 +50,7 @@ const WordStyle = Mark.create({
     const {font,latinFont,size,color,highlight,script}=mark.attrs
     const styles=[], attributes={}
     const families=[...new Set([latinFont,font].filter(validFont))]
-    if (families.length) styles.push('font-family:' + families.map(f=>'"'+f+'"').join(','))
+    if (families.length) styles.push('font-family:' + families.map(f=>'"'+f+'"').join(',')+',var(--word-font,serif)')
     if (validFont(font)) attributes['data-east-font']=font
     if (validFont(latinFont)) attributes['data-latin-font']=latinFont
     if (size>0 && size<=400) styles.push('font-size:' + size + 'pt')
@@ -89,7 +102,7 @@ const LocalImage=Image.extend({
   renderHTML({HTMLAttributes}) { return ['img',mergeAttributes(HTMLAttributes,{draggable:'false'})] },
 }).configure({allowBase64:true,inline:true})
 
-const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,WordComment,ParagraphFormat,PageBreak,SectionBreak,LocalImage,TableKit]
+const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,WordComment,WordNote,WordToc,WordBookmark,WordCrossRef,WordTextField,ParagraphFormat,PageBreak,SectionBreak,LocalImage,TableKit]
 const pointNames={42:'初号',36:'小初',26:'一号',24:'小一',22:'二号',18:'小二',16:'三号',15:'小三',14:'四号',12:'小四',10.5:'五号',9:'小五',7.5:'六号',6.5:'小六',5.5:'七号',5:'八号'}
 const sizes=[8,10,11,20,28,32,48,72,...Object.keys(pointNames).map(Number)]
 const aligns=[['left','左对齐',AlignLeft],['center','居中对齐',AlignCenter],['right','右对齐',AlignRight],['justify','两端对齐',AlignJustify]]
@@ -116,7 +129,12 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   const latest=useRef(current), callback=useRef(onChange), accepted=useRef(current.doc)
   latest.current=current; callback.current=onChange
   const [tab,setTab]=useState('开始'), [message,setMessage]=useState(''), [searching,setSearching]=useState(false)
+  const display=useWordDisplay(setMessage)
   const [bandsOpen,setBandsOpen]=useState(false)
+  const [dialog,setDialog]=useState(null), [painter,setPainter]=useState(null)
+  const [outlineOpen,setOutlineOpen]=useState(false), [ruler,setRuler]=useState(false), [grid,setGrid]=useState(false), [showMarks,setShowMarks]=useState(false)
+  const [view,setView]=useState('page'),scrollRef=useRef(null)
+  const [reviewView,setReviewView]=useState('markup')
   const [term,setTerm]=useState(''), [replacement,setReplacement]=useState('')
   const [print,setPrint]=useState(null), [printing,setPrinting]=useState(false)
   const [rows,setRows]=useState(3), [columns,setColumns]=useState(3), [zoom,setZoom]=useState(100)
@@ -124,7 +142,18 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
   const editor=useEditor({
     extensions:[...extensions,WordRevision.configure({settings:()=>revisionSettings.current,report:setMessage})],content:current.doc,
-    editorProps:{attributes:{class:'word-prose',role:'textbox','aria-label':'Word 文档正文','aria-multiline':'true'}},
+    editorProps:{attributes:{class:'word-prose',role:'textbox','aria-label':'Word 文档正文','aria-multiline':'true'},
+      handleClick(view,_pos,event) {
+        if(!event.ctrlKey && !event.metaKey)return false
+        const element=event.target.closest?.('[data-word-cross-ref],a[href^="#"]')
+        const name=element?.dataset.wordCrossRef || element?.getAttribute('href')?.slice(1)
+        if(!name || element?.getAttribute('data-link')==='false')return false
+        const range=bookmarkRanges(view.state.doc).ranges.find(r=>r.name.toLowerCase()===name.toLowerCase())
+        if(range?.start==null || range.end==null)return false
+        event.preventDefault()
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc,range.start+1,range.end)).scrollIntoView())
+        return true
+      }},
     onUpdate:({editor:instance})=>{
       const doc=instance.getJSON(), next={...latest.current,doc}
       if (callback.current(next)===false) {
@@ -148,6 +177,16 @@ export default function Word({value, onChange, onPrintPdf, title}) {
       section:currentSection(e.state.doc,e.state.selection.from),
       chars:e.state.doc.textContent.length}
   }})
+  const editorDoc=useEditorState({editor,selector:({editor:e})=>e?.state.doc,equalityFn:Object.is})
+  const outline=useMemo(()=>editorDoc?documentOutline(editorDoc):{headings:[],notes:[],tocs:[]},[editorDoc])
+  const reviewHtml=useMemo(()=>{
+    if(!editorDoc || tab!=='审阅' || reviewView==='markup') return null
+    const doc=reviewTransaction(editor.state,revisions(editorDoc),reviewView==='final').doc
+    const container=document.createElement('div')
+    container.append(DOMSerializer.fromSchema(editor.schema).serializeFragment(doc.content))
+    return container.innerHTML
+  },[editor,editorDoc,tab,reviewView])
+  useEffect(()=>{editor?.setEditable(view!=='read',false)},[editor,view])
   const section = format?.section || {index:1,end:null}
   const activeLayout=section.end?.layout || current.layout
   let priorBands={}
@@ -176,6 +215,39 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   function run(cmd,...args){editor.chain().focus()[cmd](...args).run()}
   function paragraphPatch(patch){editor.chain().focus().updateAttributes('paragraph',patch).updateAttributes('heading',patch).run()}
   function applyStyle(patch){editor.chain().focus().setMark('wordStyle',{...editor.getAttributes('wordStyle'),...patch}).run()}
+  function sizeStep(direction) {
+    const choices=[...new Set(sizes)].sort((a,b)=>direction*(a-b))
+    const size=choices.find(n=>direction*(n-activeSize)>0)
+    if(size)applyStyle({size})
+  }
+  function characterFormat() {
+    return [...(editor.state.storedMarks || (!editor.state.selection.empty && editor.state.selection.$from.nodeAfter?.marks) || editor.state.selection.$from.marks())].filter(m=>['wordStyle','bold','italic','strike','underline'].includes(m.type.name))
+  }
+  function clearCharacter(chain) {
+    for(const name of ['wordStyle','bold','italic','strike','underline'])chain.unsetMark(name)
+    return chain
+  }
+  function paintSelection() {
+    if(!painter || editor.state.selection.empty)return
+    const chain=clearCharacter(editor.chain().focus())
+    for(const mark of painter)chain.setMark(mark.type.name,mark.attrs)
+    chain.run();setPainter(null)
+  }
+  async function clipboard(action) {
+    editor.commands.focus()
+    try {
+      if(action==='paste') {
+        const text=await navigator.clipboard.readText()
+        if(text) editor.view.pasteText(text)
+      } else if(!document.execCommand(action)) setMessage(action==='copy'?'请按 Ctrl+C 复制选区。':'请按 Ctrl+X 剪切选区。')
+    } catch {setMessage('请按 Ctrl+V 从系统剪贴板粘贴。')}
+  }
+  function switchTab(name) {setTab(name);setDialog(null);if(name!=='视图' && ['read','outline'].includes(view))setView('page')}
+  function beginComment() {
+    display.setWriting(false)
+    switchTab('审阅')
+    requestAnimationFrame(()=>display.root.current?.querySelector('.word-comments textarea')?.focus())
+  }
   function search(action) {
     const hits=findText(editor.state.doc,term)
     if (!hits.length) {setMessage('没有找到匹配文字。');return}
@@ -208,7 +280,7 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     if (!editor || printing || !onPrintPdf) return
     setPrinting(true); setMessage('')
     try {
-      const sections=sectionPrintModel(editor,current.layout)
+      const sections=sectionPrintModel(editor,current.layout,current.pageColor)
       flushSync(()=>setPrint(sections))
       await Promise.all([document.fonts.ready,...[...document.querySelectorAll('.word-print-root img')].map(i=>i.decode())])
       const [pageWidth,pageHeight]=paperDimensions(sections[0].layout)
@@ -226,7 +298,11 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     return ()=>window.removeEventListener('keydown',key)
   })
   if (!editor || !format) return null
-  const activeFont=format.run.font ?? 'Microsoft YaHei', activeSize=Number(format.run.size) || 11
+  const {textDefaults}=current
+  const activeFont=format.run.font || textDefaults.font
+  const activeSize=Number(format.run.size) || ([20,16,14,13,12,11][format.heading-1] ?? textDefaults.size)
+  const defaultTextStyle={'--word-font': [...new Set([textDefaults.latinFont,textDefaults.font])].map(n=>'"'+n+'"').join(',')+',serif',
+    '--word-size':textDefaults.size+'pt'}
   const marginText=[layout.top,layout.right,layout.bottom,layout.left].map(v=>v+'mm').join(' ')
   const firstType=layout.differentFirst?'first':'default'
   function bandPreview(kind) {
@@ -234,8 +310,12 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     return band.text && <div className={'word-band-preview word-'+kind} style={{textAlign:band.align}}
       title={kind==='header'?'页眉':'页脚'}>{band.text.replaceAll('{{PAGE}}','1').replaceAll('{{NUMPAGES}}','…')}</div>
   }
-  const customMargin=![12.7,25.4,38.1].some(n=>[layout.top,layout.right,layout.bottom,layout.left].every(v=>Math.abs(v-n)<0.06))
-  return <section className="word-editor" aria-label="文字处理" onKeyDownCapture={event=>{
+  const standardMargins=Object.entries(standardWordMargins).every(([key,mm])=>Math.abs(layout[key]-mm)<.06)
+  const marginPreset=standardMargins?'standard':[12.7,25.4,38.1].find(n=>[layout.top,layout.right,layout.bottom,layout.left].every(v=>Math.abs(v-n)<.06)) ?? 'custom'
+  return <section className="word-editor" style={defaultTextStyle} ref={display.root} data-writing={display.writing} data-eye-comfort={display.eyeComfort} aria-label="文字处理" onKeyDownCapture={event=>{
+    if (event.ctrlKey && event.altKey && !event.shiftKey && !event.metaKey && event.code==='KeyM' && !event.nativeEvent.isComposing) {
+      event.preventDefault();beginComment();return
+    }
     if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.key.toLowerCase()!=='e' ||
         event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -246,20 +326,28 @@ export default function Word({value, onChange, onPrintPdf, title}) {
       setMessage(enabled ? '已开启修订' : '已关闭修订')
     }
   }}>
-    <Ribbon label="文字" active={tab} onChange={setTab} tabs={['开始','插入','布局','审阅','视图']}>
+    {display.writing && <WritingModeBar exit={()=>display.setWriting(false)}/>}
+    <Ribbon label="文字" active={tab} onChange={switchTab} tabs={['开始','插入','页面','引用','审阅','视图']}>
       <Action label="查找替换" icon={Search} onClick={()=>{setSearching(!searching);requestAnimationFrame(()=>searchRef.current?.focus())}}/>
       <Action label="导出 PDF" icon={FileDown} onClick={printPdf} disabled={printing || !onPrintPdf}/>
     </Ribbon>
     {tab!=='审阅' && <div className="word-tools ribbon-panel" role="toolbar" aria-label={tab+'工具'}>
-      {tab==='开始' && <><RibbonGroup label="编辑">
+      {tab==='开始' && <><RibbonGroup label="剪贴板">
+        <Action icon={ClipboardPaste} label="粘贴" onClick={()=>clipboard('paste')}/>
+        <Action compact icon={Copy} label="复制" disabled={editor.state.selection.empty} onClick={()=>clipboard('copy')}/>
+        <Action compact icon={Scissors} label="剪切" disabled={editor.state.selection.empty} onClick={()=>clipboard('cut')}/>
+        <Action icon={Paintbrush} label="格式刷" pressed={!!painter} onClick={()=>setPainter(painter?null:characterFormat())}/>
         <Action compact icon={Undo2} label="撤销" onClick={()=>run('undo')} disabled={!format.undo}/><Action compact icon={Redo2} label="重做" onClick={()=>run('redo')} disabled={!format.redo}/>
         </RibbonGroup><RibbonGroup label="样式与字体">
         <select aria-label="段落样式" value={format.heading} onChange={e=>Number(e.target.value)?run('setHeading',{level:Number(e.target.value)}):run('setParagraph')}>
           <option value="0">正文</option>{[1,2,3,4,5,6].map(v=><option key={v} value={v}>标题 {v}</option>)}</select>
         <FontPicker label="字体" value={activeFont} onChange={font=>applyStyle({font})}/>
-        <FontPicker label="西文字体" value={format.run.latinFont || ''} defaultLabel="西文随字体" onChange={font=>applyStyle({latinFont:font || null})}/>
+        <FontPicker label="西文字体" value={format.run.latinFont || format.run.font || textDefaults.latinFont} defaultLabel="西文随字体" onChange={font=>applyStyle({latinFont:font || null})}/>
         <select aria-label="字号" value={activeSize} onChange={e=>applyStyle({size:Number(e.target.value)})}>
           {[...new Set([...sizes,activeSize])].sort((a,b)=>a-b).map(s=><option key={s} value={s}>{pointNames[s] ? pointNames[s]+' · ' : ''}{s} pt</option>)}</select>
+        <Action compact label="增大字号" icon={AArrowUp} onClick={()=>sizeStep(1)} disabled={activeSize>=Math.max(...sizes)}/>
+        <Action compact label="减小字号" icon={AArrowDown} onClick={()=>sizeStep(-1)} disabled={activeSize<=Math.min(...sizes)}/>
+        <Action compact label="清除字符格式" icon={Eraser} onClick={()=>clearCharacter(editor.chain().focus()).run()}/>
         {markButtons.map(([m,label,icon,cmd])=><Action compact key={m} icon={icon} label={label} pressed={format.marks[m]} onClick={()=>run(cmd)}/>)}
         <label className="word-color" title="文字颜色">A<input aria-label="文字颜色" type="color" value={format.run.color || '#37352f'} onChange={e=>applyStyle({color:e.target.value})}/></label>
         <select aria-label="荧光标记" value={format.run.highlight || ''} onChange={e=>applyStyle({highlight:e.target.value || null})}>
@@ -269,6 +357,8 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         </RibbonGroup><RibbonGroup label="段落">
         {aligns.map(([a,label,icon])=><Action compact key={a} label={label} icon={icon} pressed={format.align===a} onClick={()=>paragraphPatch({align:a})}/>)}
         <Action compact label="项目符号" icon={List} pressed={format.bullet} onClick={()=>run('toggleBulletList')}/><Action compact label="编号列表" icon={ListOrdered} pressed={format.numbered} onClick={()=>run('toggleOrderedList')}/>
+        <Action compact label="减少缩进" icon={IndentDecrease} disabled={!(format.paragraph.leftIndent>0)} onClick={()=>paragraphPatch({leftIndent:Math.max(0,(format.paragraph.leftIndent || 0)-21)})}/>
+        <Action compact label="增加缩进" icon={IndentIncrease} onClick={()=>paragraphPatch({leftIndent:(format.paragraph.leftIndent || 0)+21})}/>
         <label>行距 <select aria-label="行距" value={format.spacing} onChange={e=>paragraphPatch({lineSpacing:Number(e.target.value)})}>
           {[...new Set([1,1.25,1.5,2,format.spacing])].sort((a,b)=>a-b).map(n=><option key={n}>{n}</option>)}</select></label>
       </RibbonGroup></>}
@@ -282,8 +372,11 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         </RibbonGroup><RibbonGroup label="插图和分页">
         <Action label="插入图片" icon={ImagePlus} onClick={()=>fileRef.current.click()}/>
         <Action label="插入分页符" onClick={()=>run('insertContent',{type:'pageBreak'})}/>
-      </RibbonGroup></>}
-      {tab==='布局' && <><RibbonGroup label="段落间距">
+      </RibbonGroup><WordInsertExtras editor={editor} setDialog={setDialog} onComment={beginComment}/></>}
+      {tab==='引用' && <><WordReferenceTools editor={editor} outline={outline} dialog={dialog} setDialog={setDialog}/><WordCrossRefTools editor={editor} onClick={()=>setDialog({type:'cross'})} report={setMessage}/></>}
+      {tab==='页面' && <><RibbonGroup label="页边距">
+        <div className="word-margin-fields">{[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=><MarginInput key={key} side={key} label={label} mm={layout[key]} onChange={changeLayout}/>)}</div>
+      </RibbonGroup><RibbonGroup label="段落间距">
         <label>首行 <select aria-label="首行缩进" value={format.paragraph.firstLineChars ?? (format.paragraph.firstLinePt ? 'pt' : 0)}
           onChange={e=>paragraphPatch({firstLineChars:Number(e.target.value),firstLinePt:null})}>
           {[...new Set([0,1,2,3,...(Number.isFinite(format.paragraph.firstLineChars)?[format.paragraph.firstLineChars]:[])])].map(n=><option key={n} value={n}>{n} 字符</option>)}
@@ -301,18 +394,33 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         <label>纸张 <select aria-label="纸张大小" value={layout.paper} onChange={e=>changeLayout({paper:e.target.value})}>
           {Object.keys(papers).map(p=><option key={p}>{p}</option>)}{layout.paper==='custom'&&<option value="custom">文档自定义</option>}</select></label>
         <label>方向 <select aria-label="纸张方向" value={layout.landscape?'landscape':'portrait'} onChange={e=>changeLayout({landscape:e.target.value==='landscape'})}><option value="portrait">纵向</option><option value="landscape">横向</option></select></label>
-        <label>页边距 <select aria-label="页边距" value={customMargin?'custom':[12.7,25.4,38.1].find(n=>Math.abs(layout.top-n)<0.06)} onChange={e=>{const n=Number(e.target.value);changeLayout({top:n,bottom:n,left:n,right:n})}}>
-          <option value="12.7">窄 · 1.27 厘米</option><option value="25.4">普通 · 2.54 厘米</option><option value="38.1">宽 · 3.81 厘米</option>{customMargin && <option value="custom">文档自定义</option>}</select></label>
-      </RibbonGroup></>}
-      {tab==='视图' && <><RibbonGroup label="显示比例">
+        <label>页边距 <select aria-label="页边距" value={marginPreset} onChange={e=>{
+          const n=Number(e.target.value)
+          changeLayout(e.target.value==='standard'?standardWordMargins:{top:n,bottom:n,left:n,right:n})
+        }}>
+          <option value="standard">常规 · 上下 2.54 / 左右 3.18 厘米</option><option value="12.7">窄 · 1.27 厘米</option><option value="25.4">四边 2.54 厘米</option>
+          <option value="38.1">宽 · 3.81 厘米</option>{marginPreset==='custom' && <option value="custom">文档自定义</option>}</select></label>
+      </RibbonGroup><WordLineControls layout={layout} singleSection={!breaks.length} changeLayout={changeLayout}/><WordPageAppearance layout={layout} color={current.pageColor} changeLayout={changeLayout}
+        changeColor={pageColor=>{const next={...latest.current};if(pageColor)next.pageColor=pageColor;else delete next.pageColor;onChange(next)}}/></>}
+      {tab==='视图' && <><WordDisplayTools display={display} startWriting={()=>{
+        setView('page');display.setWriting(true);requestAnimationFrame(()=>editor.commands.focus())
+      }}/><RibbonGroup label="文档视图">
+        {[[FileText,'页面','page'],[BookOpen,'阅读版式','read'],[WrapText,'Web 版式','web'],[ListOrdered,'大纲','outline']].map(([icon,label,key])=><Action key={key} label={label} icon={icon} pressed={view===key} onClick={()=>setView(key)}/>)}
+      </RibbonGroup><RibbonGroup label="显示">
+        {[[PanelLeft,'导航窗格',outlineOpen,setOutlineOpen],[Ruler,'标尺',ruler,setRuler],[Grid2X2,'网格线',grid,setGrid],[Pilcrow,'段落标记',showMarks,setShowMarks]].map(([icon,label,on,set])=><Action key={label} icon={icon} label={label} pressed={on} onClick={()=>set(!on)}/>)}
+      </RibbonGroup><RibbonGroup label="显示比例">
         {[75,100,125,150].map(n=><Action key={n} label={n+'%'} pressed={zoom===n} onClick={()=>setZoom(n)}/>)}
+        <Action label="页宽" icon={MoveHorizontal} onClick={()=>setZoom(Math.max(20,Math.min(300,Math.floor((scrollRef.current.clientWidth-48)/(width*96/25.4)*100))))}/>
       </RibbonGroup><RibbonGroup label="导航">
         <Action label="跳至文首" onClick={()=>editor.commands.focus('start')}/>
         <Action label="跳至文末" onClick={()=>editor.commands.focus('end')}/>
       </RibbonGroup></>}
     </div>}
     {bandsOpen && tab==='插入' && <WordBands layout={layout} localBands={activeLayout.bands} hasPrevious={section.index>1} onChange={changeLayout}/>}
-    {tab==='审阅' && <><WordRevisions editor={editor} enabled={!!current.trackChanges} author={revisionAuthor}
+    {dialog?.kind && <WordNoteForm editor={editor} dialog={dialog} setDialog={setDialog}/>}
+    {dialog?.type==='link' && <WordLinkForm editor={editor} dialog={dialog} setDialog={setDialog}/>}
+    {['bookmarks','cross'].includes(dialog?.type) && <WordBookmarkPanel key={dialog.type} editor={editor} cross={dialog.type==='cross'} close={()=>setDialog(null)}/>}
+    {tab==='审阅' && <><WordRevisions editor={editor} beginComment={beginComment} enabled={!!current.trackChanges} author={revisionAuthor} reviewView={reviewView} setReviewView={setReviewView}
       toggle={enabled=>onChange({...latest.current,trackChanges:enabled})} setAuthor={name=>{setRevisionAuthor(name);localStorage.setItem('word-revision-author',name)}}/>
       <WordComments editor={editor}/></>}
     {searching && <div className="word-find"><input ref={searchRef} aria-label="查找文字" placeholder="查找文字" value={term} onChange={e=>setTerm(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')search('next')}}/>
@@ -330,12 +438,26 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         (sectionStart?'.word-sheet .word-prose > :nth-child(-n+'+(breaks[section.index-2].index+1)+'){display:none}':'')+
         (section.end?'.word-sheet .word-prose > :nth-child(n+'+(breaks[section.index-1].index+1)+'){display:none}':'')}</style>
     </nav>}
-    <div className="word-scroll"><div className="word-sheet" style={{width:width+'mm',minHeight:height+'mm',padding:marginText,zoom:zoom/100,'--word-columns':layout.columns||1,'--word-column-gap':(layout.columnGap??12.7)+'mm'}}>
-      {bandPreview('header')}<EditorContent editor={editor}/>{bandPreview('footer')}
-    </div></div>
+    {view==='outline' && <WordOutlineView editor={editor} headings={outline.headings} openHeading={pos=>{
+      setView('page');requestAnimationFrame(()=>editor.chain().focus().setTextSelection(pos+1).scrollIntoView().run())
+    }}/>}
+    <div className="word-desk" hidden={view==='outline'}>
+      {outlineOpen && <nav className="word-outline" aria-label="标题导航"><strong>导航</strong>{outline.headings.length?outline.headings.map(h=><button key={h.pos} style={{paddingInlineStart:8+(h.level-1)*12}} onClick={()=>editor.chain().focus().setTextSelection(h.pos+1).scrollIntoView().run()}>{h.text || '空标题'}</button>):<p>文档暂无标题</p>}</nav>}
+      <div ref={scrollRef} className={'word-scroll word-view-'+view}>
+      {ruler && <div className="word-ruler" aria-label="厘米标尺" style={{width:width+'mm',zoom:zoom/100}}>{Array.from({length:Math.floor(width/10)},(_,i)=><span key={i}>{i}</span>)}</div>}
+      <div className="word-sheet" data-grid={grid} data-marks={showMarks} data-painter={!!painter} style={{backgroundColor:current.pageColor,width:width+'mm',minHeight:height+'mm',padding:marginText,zoom:zoom/100,'--word-columns':layout.columns||1,'--word-column-gap':(layout.columnGap??12.7)+'mm'}}>
+        {view!=='web' && <WordPageFrame layout={layout}/>}
+        {view==='page' && reviewHtml===null && <WordLineNumbers editor={editor} layout={layout} sectionIndex={section.index} zoom={zoom}/>}
+      {bandPreview('header')}<div hidden={reviewHtml!==null} onPointerUp={()=>{if(painter)requestAnimationFrame(paintSelection)}} onKeyUp={e=>{if(e.key==='Shift')paintSelection();if(e.key==='Escape')setPainter(null)}}><EditorContent editor={editor}/></div>
+      {reviewHtml!==null && <div className="word-prose" role="document" aria-label="修订预览" dangerouslySetInnerHTML={{__html:reviewHtml}}/>}
+      {Object.entries(noteKinds).map(([kind,label])=>{
+        const notes=outline.notes.filter(n=>n.node.attrs.kind===kind && (kind==='endnote' || (n.pos>=sectionStart && (!section.end || n.pos<section.end.pos))))
+        return notes.length>0 && <aside className="word-notes" aria-label={label+'列表'} key={kind}>{notes.map(({node,pos,number})=><button key={pos} title={'编辑'+label} onClick={()=>{editor.chain().focus().setNodeSelection(pos).scrollIntoView().run();switchTab('引用');setDialog({kind,text:node.attrs.text,pos,edit:true})}}><sup>{number}</sup> {node.attrs.text}</button>)}</aside>
+      })}{bandPreview('footer')}
+    </div></div></div>
     <div className="word-status"><span>{layout.paper} · {layout.landscape?'横向':'纵向'}</span><span>{format.chars} 字符</span><label>缩放 <select aria-label="文档缩放" value={zoom} onChange={e=>setZoom(Number(e.target.value))}>
-      {[60,75,85,100,125,150].map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
-    {print!==null && createPortal(<div className="word-print-root">
+      {[...new Set([60,75,85,100,125,150,zoom])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
+    {print!==null && createPortal(<div className="word-print-root" style={defaultTextStyle}>
       <style>{'@media print {'+print.map(section=>section.css).join('')+'html,body {overflow:visible !important;height:auto !important;margin:0 !important} body > :not(.word-print-root){display:none !important}.word-print-root{display:block !important}}'}</style>
       {print.map(({name,layout,html})=><section className="word-prose" key={name} style={{page:name,columnCount:layout.columns||1,columnGap:(layout.columnGap??12.7)+'mm'}}
         dangerouslySetInnerHTML={{__html:html || '<p>&nbsp;</p>'}}/>)}

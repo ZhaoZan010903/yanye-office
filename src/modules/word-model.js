@@ -27,7 +27,12 @@ export function sectionLayout(incoming = {}) {
 
 export function wordValue(value = {}) {
   const layout = sectionLayout(value?.layout)
-  return { ...(value?.protectedRevisions ? {protectedRevisions:true} : {}), ...(value?.trackChanges ? {trackChanges: true} : {}), doc: value?.doc?.type === 'doc' ? value.doc : blankDoc, layout, compatibility: value?.compatibility ?? [] }
+  const text=value?.textDefaults || {}
+  // These fallbacks match previously saved local pages that predate textDefaults.
+  const textDefaults={font:validFont(text.font)?text.font:'Microsoft YaHei',latinFont:validFont(text.latinFont)?text.latinFont:'Calibri',
+    size:Number.isFinite(text.size) && text.size>=.5 && text.size<=819 ? Math.round(text.size*2)/2 : 11}
+  return { textDefaults, ...(validColor(value?.pageColor) ? {pageColor:value.pageColor} : {}), ...(value?.protectedFields?{protectedFields:true}:{}),
+    ...(value?.protectedNotes ? {protectedNotes:true} : {}), ...(value?.protectedRevisions ? {protectedRevisions:true} : {}), ...(value?.trackChanges ? {trackChanges: true} : {}), doc: value?.doc?.type === 'doc' ? value.doc : blankDoc, layout, compatibility: value?.compatibility ?? [] }
 }
 
 // An omitted header/footer relationship inherits that slot from the prior

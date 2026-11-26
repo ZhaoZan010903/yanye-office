@@ -13,6 +13,41 @@ export const slideThemes = {
 
 export const shapeKinds = { rect:'矩形', roundRect:'圆角矩形', ellipse:'椭圆', triangle:'三角形', diamond:'菱形', rightArrow:'右箭头' }
 const hex = (value, fallback) => /^[0-9A-F]{6}$/i.test(value) ? value.toUpperCase() : fallback
+const bounded = (number, fallback, min, max) => Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback
+
+export function slideTextFormat(values = {}) {
+  return {
+    fontFace: String(values.fontFace || 'Microsoft YaHei').slice(0,100),
+    fontSize: bounded(values.fontSize, 22, 6, 144),
+    color: hex(values.color, '37352F'),
+    bold: !!values.bold, italic: !!values.italic, underline: !!values.underline, strike: !!values.strike,
+    align: ['left','center','right','justify'].includes(values.align) ? values.align : 'left',
+    lineSpacing: bounded(values.lineSpacing, undefined, .5, 5),
+  }
+}
+
+export function fieldFormat(slide, field, theme) {
+  const title = field === 'title'
+  return slideTextFormat({ color:theme.ink, fontSize:title ? (slide.layout === 'cover' ? 46 : 36) : 22,
+    bold:title, ...(title ? slide.titleBox : undefined), ...slide.fieldFormats?.[field] })
+}
+
+export function slideTextStyle(format) {
+  return {
+    color:'#'+format.color, fontFamily:format.fontFace, fontSize:format.fontSize / 9.6 + 'cqw',
+    fontWeight:format.bold ? 700 : 400, fontStyle:format.italic ? 'italic' : undefined, textAlign:format.align,
+    textDecoration:[format.underline && 'underline', format.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
+    lineHeight:format.lineSpacing,
+  }
+}
+
+export function alignToSlide(box, edge) {
+  const horizontal = {left:0, center:(1-box.w)/2, right:1-box.w}
+  const vertical = {top:0, middle:(1-box.h)/2, bottom:1-box.h}
+  if (Object.hasOwn(horizontal, edge)) return {x:horizontal[edge]}
+  if (Object.hasOwn(vertical, edge)) return {y:vertical[edge]}
+  return {}
+}
 
 export function newSlide(overrides = {}) {
   return { id: crypto.randomUUID(), layout: 'text', title: '', body: '', side: '', notes: '', ...overrides }
@@ -22,21 +57,19 @@ const firstSlide = { id: 'first', layout: 'cover', title: '', body: '', side: ''
 const blankDeck = { theme: 'paper', slides: [firstSlide] }
 
 export function textBox(values = {}) {
-  const bounded = (number, fallback, min, max) => Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback
   const w = bounded(values.w, .38, .04, 1), h = bounded(values.h, .15, .04, 1)
   return {
     id: values.id || crypto.randomUUID(), text: String(values.text ?? ''),
     x: bounded(values.x ?? .12, 0, 0, 1-w), y: bounded(values.y ?? .45, 0, 0, 1-h), w, h,
-    color: hex(values.color,'37352F'),
-    fontSize: bounded(values.fontSize, 22, 6, 144),
-    fontFace: String(values.fontFace || 'Microsoft YaHei').slice(0,100), bold:!!values.bold, italic:!!values.italic,
-    align: ['left','center','right'].includes(values.align) ? values.align : 'left',
+    ...slideTextFormat(values),
   }
 }
 
 export function slideShape(values = {}) {
   const box = textBox({ x:.35,y:.36,w:.26,h:.22,fontSize:18, ...values })
   return { ...box, kind:Object.hasOwn(shapeKinds,values.kind) ? values.kind : 'rect',
+    // Earlier workspaces centered every shape label, regardless of the unused align field.
+    shapeTextAlign: values.shapeTextAlign || 'center',
     fill:hex(values.fill,'D8E9EB'), stroke:hex(values.stroke,'54838B'),
     rotation:Number.isFinite(values.rotation) ? (values.rotation % 360 + 360) % 360 : 0 }
 }

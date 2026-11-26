@@ -1,3 +1,5 @@
+import { newWordContent } from './word-template.mjs'
+
 export const MAX_TITLE_LENGTH = 120
 export const MAX_MARKDOWN_LENGTH = 2_000_000
 export const MAX_PAGES = 2_000
@@ -66,8 +68,9 @@ export function pageTitle(page) {
 
 export function makePage({ id = crypto.randomUUID(), title = '', markdown = '', parentId = null, kind = 'note', favorite = false } = {}) {
   const now = new Date().toISOString()
+  const content = kind === 'word' ? newWordContent() : {}
   return { id, title, markdown, parentId, kind, favorite, createdAt: now, updatedAt: now, deletedAt: null,
-    ...(Object.hasOwn(officeKinds, kind) ? { content: {} } : {}) }
+    ...(Object.hasOwn(officeKinds, kind) ? { content } : {}) }
 }
 
 export function initialWorkspace() {

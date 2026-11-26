@@ -2,6 +2,9 @@ import { highlights, paperDimensions, validColor, validFont, wordValue, sectionL
 import { bandTypes, pageBand, pageTypes, writeBand } from './word-bands.js'
 import {sectionPropertiesXml} from './word-section-xml.js'
 import {commentWriter} from './word-comments.js'
+import {createNoteParts,tocXml} from './word-references.js'
+import {bookmarkWriter,referenceXml,validBookmark} from './word-bookmarks.js'
+import {storedFieldXml} from './word-text-fields.js'
 export { readDocx } from './word-import.js'
 
 const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -19,9 +22,10 @@ function relationships(entries) {
     '<Relationship Id="' + id + '" Type="' + rel + '/' + type + '" Target="' + escape(target) + '"' + (external ? ' TargetMode="External"' : '') + '/>').join('') + '</Relationships>'
 }
 
-function styles() {
+function styles(text) {
   const headings = Array.from({length: 6}, (_,i) => '<w:style w:type="paragraph" w:styleId="Heading' + (i+1) + '"><w:name w:val="heading ' + (i+1) + '"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:pPr><w:keepNext/>' + tag('outlineLvl',i) + '</w:pPr><w:rPr><w:b/>' + tag('sz',[40,32,28,26,24,22][i]) + '</w:rPr></w:style>').join('')
-  return xml + '<w:styles xmlns:w="' + w + '"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Microsoft YaHei"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="100" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' + headings + '</w:styles>'
+  const run='<w:rFonts w:ascii="'+escape(text.latinFont)+'" w:hAnsi="'+escape(text.latinFont)+'" w:eastAsia="'+escape(text.font)+'"/>'+tag('sz',text.size*2)
+  return xml + '<w:styles xmlns:w="' + w + '"><w:docDefaults><w:rPrDefault><w:rPr>'+run+'</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="100" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' + headings + '</w:styles>'
 }
 
 function numbering(lists) {
@@ -57,7 +61,9 @@ function runProperties(marks) {
 export async function writeDocx(value) {
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
-  const { doc, layout, trackChanges, protectedRevisions } = wordValue(value)
+  const { doc, layout, textDefaults, pageColor, trackChanges, protectedRevisions, protectedNotes } = wordValue(value)
+  if (protectedNotes) throw Error('注释含有复杂对象或缺少正文。请使用保留原版式模式保存原件。')
+  if(value?.protectedFields) throw Error('原件含有无法完整重建的域或书签。请使用保留原版式模式写回原件。')
   if (protectedRevisions) throw Error('原件包含格式、段落或对象修订。请在 WPS 或 Word 审阅这些修订后再写回，以保留审阅记录。')
   let sectionNumber=0, revisionNumber=0, activeLayout=layout
   const assignedRevisionIds=new Set(), reservedRevisionIds=new Set()
@@ -84,8 +90,14 @@ export async function writeDocx(value) {
   const entries = [['rStyles','styles','styles.xml'],['rNumbers','numbering','numbering.xml']]
   const lists = []
   const comments=commentWriter(escape)
+  const notes=createNoteParts(escape)
+  const bookmarks=bookmarkWriter(escape)
   let imageCount = 0
   function inline(n) {
+    if(n.type==='wordTextField') return storedFieldXml(n.attrs,escape)
+    if(n.type==='wordBookmark') return bookmarks.anchor(n.attrs)
+    if(n.type==='wordCrossRef') return referenceXml(n.attrs,escape)
+    if (n.type==='wordNote') return notes.reference(n.attrs)
     if (n.type === 'hardBreak') return '<w:r><w:br/></w:r>'
     if (n.type === 'image') {
       const a = n.attrs ?? {}
@@ -104,6 +116,7 @@ export async function writeDocx(value) {
     return '<w:r>' + runProperties(n.marks) + parts + '</w:r>'
   }
   function linkStart(href) {
+    if(href.startsWith('#') && validBookmark(href.slice(1))) return '<w:hyperlink w:anchor="'+escape(href.slice(1))+'">'
     const rid = 'rLink' + entries.length
     entries.push([rid,'hyperlink',href,true])
     return '<w:hyperlink r:id="' + rid + '">'
@@ -166,6 +179,7 @@ export async function writeDocx(value) {
     return '<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>' + borders + '</w:tblBorders></w:tblPr><w:tblGrid>' + ('<w:gridCol w:w="' + width + '"/>').repeat(columns) + '</w:tblGrid>' + result.join('') + '</w:tbl>'
   }
   function block(n, level = 0) {
+    if (n.type==='wordToc') return tocXml(n.attrs,escape,bookmarks.anchor)
     if (n.type === 'pageBreak') return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
     if (n.type === 'table') return table(n)
     if (n.type === 'bulletList' || n.type === 'orderedList') {
@@ -217,18 +231,21 @@ export async function writeDocx(value) {
     else pending.push(node)
   }
   const lastSection=emitSection(pending,layout,false)
+  bookmarks.validate()
+  notes.write(zip,parts,entries,xml)
   if(comments.notes.length) {
     parts.push(['comments','comments'])
     entries.push(['rComments','comments','comments.xml'])
     zip.file('word/comments.xml',xml+comments.body())
   }
-  if (usedEven || trackChanges) {
+  if (usedEven || trackChanges || pageColor) {
     parts.push(['settings','settings'])
     entries.push(['rSettings','settings','settings.xml'])
-    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'">'+(trackChanges?'<w:trackRevisions/>':'')+(usedEven?'<w:evenAndOddHeaders/>':'')+'</w:settings>')
+    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'">'+(pageColor?'<w:displayBackgroundShape/>':'')+(trackChanges?'<w:trackRevisions/>':'')+(usedEven?'<w:evenAndOddHeaders/>':'')+'</w:settings>')
   }
-  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + body + lastSection+'</w:body></w:document>')
-  zip.file('word/styles.xml',styles())
+  const background = pageColor ? '<w:background w:color="'+pageColor.slice(1).toUpperCase()+'"/>' : ''
+  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'+background+'<w:body>' + body + lastSection+'</w:body></w:document>')
+  zip.file('word/styles.xml',styles(textDefaults))
   zip.file('word/numbering.xml',numbering(lists))
   zip.file('word/_rels/document.xml.rels',relationships(entries))
   zip.file('_rels/.rels',relationships([['rDoc','officeDocument','word/document.xml']]))

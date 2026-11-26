@@ -18,5 +18,30 @@
 .ribbon-group-tools { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
 .ribbon-group-tools svg { color:var(--ribbon-accent); }
 .office-page[data-ribbon-hidden=true] :is(.office-ribbon,.ribbon-panel,.sheet-functions) { display:none; }
+[data-office-workspace=true] .office-page .office-ribbon {
+  display:flex; min-height:32px; padding:0 10px; gap:8px;
+  align-items:center; flex-wrap:wrap; border:0; border-bottom:1px solid var(--color-hairline);
+  background:var(--office-chrome); justify-content:flex-start;
+}
+[data-office-workspace=true] .office-ribbon .office-file-bar { border-right:1px solid #d9dce0; padding-right:8px; }
+[data-office-workspace=true] .office-file-bar .icon-button { width:25px; height:25px; padding:2px; color:#474846; }
+[data-office-workspace=true] .ribbon-tabs { min-height:32px; gap:2px; }
+[data-office-workspace=true] .ribbon-tabs button { padding:4px 9px; color:#37352f; line-height:22px; }
+[data-office-workspace=true] .ribbon-tabs button[aria-selected=true] { color:#255ea9; font-weight:600; }
+[data-office-workspace=true] .ribbon-tabs button[aria-selected=true]::after { inset:auto 8px 1px; }
+[data-office-workspace=true] .ribbon-quick { gap:2px; margin-inline-start:auto; }
+[data-office-workspace=true] .ribbon-quick button { font-size:12px; padding:3px 6px; }
+[data-office-workspace=true] .ribbon-panel { gap:0; background:#fff; padding:4px 10px; border-top:0; }
+[data-office-workspace=true] .ribbon-group { justify-content:flex-start; gap:2px; max-width:100%; padding-inline:9px; border-color:var(--color-hairline); }
+[data-office-workspace=true] .ribbon-group:first-child { padding-inline-start:0; }
+[data-office-workspace=true] .ribbon-group-tools { row-gap:2px; column-gap:3px; }
+[data-office-workspace=true] .ribbon-group-tools svg { color:#514f4a; }
+[data-office-workspace=true] .ribbon-group-tools :is(.lucide-clipboard-paste,.lucide-link,.lucide-list-tree,.lucide-copy) { color:#37679e; }
+[data-office-workspace=true] .ribbon-group-tools :is(.lucide-table,.lucide-file-spreadsheet,.lucide-sigma,.lucide-chart-column) { color:#267452; }
+[data-office-workspace=true] .ribbon-group-tools :is(.lucide-paintbrush,.lucide-image-plus,.lucide-paint-bucket,.lucide-presentation) { color:#a26236; }
+[data-office-workspace=true] .ribbon-group-tools button[aria-pressed=true] svg { color:var(--file-ink); }
+[data-office-workspace=true] .ribbon-group-tools :is(button,summary) { font-size:13px; min-height:25px; }
+[data-office-workspace=true] .ribbon-group > small { font-size:10px; line-height:14px; }
+[data-office-workspace=true] .office-page[data-ribbon-hidden=true] .ribbon-quick { display:none; }
 @media (prefers-reduced-motion:reduce) { .office-ribbon button,.ribbon-group-tools button { transition:none; } }
 @media (max-width:760px) { .office-ribbon,.ribbon-panel { padding-inline:6px; } .office-ribbon { flex-wrap:wrap; } .ribbon-group { padding:3px 6px; } }

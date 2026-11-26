@@ -2,6 +2,7 @@ import JSZip from 'jszip'
 import { SaxesParser } from 'saxes'
 import { parseRange,rangeName } from './spreadsheet.js'
 import {addChart,readChart} from './sheet-chart-xml.js'
+import {readCellNotes,readPrintAreas,writeNoteAuthors,writePrintNames} from './sheet-review-xml.js'
 
 const spreadsheetNS='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 const relationshipsNS='http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -30,15 +31,19 @@ export async function nativeRules(bytes, archive) {
       if(path.origin==='https://package.invalid') paths.set(a.Id.value,decodeURIComponent(path.pathname.slice(1)))
     }
   })
-  parse(await xml('xl/workbook.xml'),node=>{
+  const workbookXml=await xml('xl/workbook.xml'), areas=readPrintAreas(workbookXml)
+  parse(workbookXml,node=>{
     if(node.local==='sheet' && node.uri===spreadsheetNS) {
       const id=Object.values(node.attributes).find(a=>a.uri===relationshipsNS && a.local==='id')?.value
       if(paths.has(id)) sheets.push([node.attributes.name.value,paths.get(id)])
     }
   })
   const result=new Map()
-  for (const [name,path] of sheets) {
+  for (const [index,[name,path]] of sheets.entries()) {
     const source=await xml(path)
+    const notes=await readCellNotes(zip,path)
+    const sheetInfo={notes,areas:areas.get(index)}
+    result.set(name,sheetInfo)
     if (!/(?:dataValidations|autoFilter|drawing)/.test(source)) continue
     const validations=[]
     let autoFilter, filterColumn, rule, formula, withinFilters=false, filterValues,drawing,custom
@@ -90,13 +95,14 @@ export async function nativeRules(bytes, archive) {
         rule=undefined
       }
     },text=>{if(rule && formula!==undefined) rule.formulae[formula]+=text})
-    result.set(name,{validations,autoFilter,chart:drawing?await readChart(zip,path,drawing,name):undefined})
+    result.set(name,{...sheetInfo,validations,autoFilter,chart:drawing?await readChart(zip,path,drawing,name):undefined})
   }
   return result
 }
 
 export async function writeNativeRules(bytes,sheets,display) {
-  if (!sheets.some(s=>s.pivot || s.chart || s.validations?.length || Object.keys(s.autoFilter?.columns??{}).length)) return bytes
+  if (!sheets.some(s=>s.pivot || s.chart || s.validations?.length || Object.keys(s.autoFilter?.columns??{}).length ||
+    Object.keys(s.notes??{}).length || s.pageSetup?.areas?.length || s.pageSetup?.printTitlesRow || s.pageSetup?.printTitlesColumn)) return bytes
   const zip=await JSZip.loadAsync(bytes)
   for (const [index,sheet] of sheets.entries()) {
     const path='xl/worksheets/sheet'+(index+1)+'.xml'
@@ -115,11 +121,13 @@ export async function writeNativeRules(bytes,sheets,display) {
       xml=xml.replace(/<autoFilter\b[^>]*\/>/,()=>'<autoFilter ref="'+rangeName(sheet.autoFilter.box)+'">'+parts+'</autoFilter>')
     }
     zip.file(path,xml)
+    if(Object.keys(sheet.notes??{}).length) await writeNoteAuthors(zip,path,sheet.notes)
     if(sheet.chart) await addChart(zip,sheet,index,display)
   }
   if(sheets.some(s=>s.pivot)) {
     const {writePivotParts}=await import('./sheet-pivot-xml.js')
     await writePivotParts(zip,{sheets})
   }
+  await writePrintNames(zip,sheets)
   return zip.generateAsync({type:'uint8array',compression:'DEFLATE'})
 }

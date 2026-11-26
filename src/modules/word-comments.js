@@ -1,3 +1,4 @@
+import {validBookmark} from './word-bookmarks.js'
 const word='http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const elements=(node,tag)=>[...(node?.getElementsByTagNameNS(word,tag)??[])]
 const attribute=(node,name)=>node.getAttributeNS(word,name)??''
@@ -37,7 +38,7 @@ export function commentWriter(escape) {
       const mark=node.marks?.find(m=>m.type==='wordRevision')?.attrs
       const next=mark && ['ins','del'].includes(mark.kind)?mark:null
       const link=node.marks?.find(m=>m.type==='link')?.attrs?.href
-      const nextHref=/^(?:https?:\/\/|mailto:)/i.test(link)?link:null
+      const nextHref=(/^(?:https?:\/\/|mailto:)/i.test(link) || (link?.startsWith('#') && validBookmark(link.slice(1))))?link:null
       // OOXML permits a revision inside a hyperlink, in this order only.
       if (nextHref!==href || revision?.id!==next?.id || revision?.kind!==next?.kind) {
         if (revision) xml+='</w:'+revision.kind+'>'

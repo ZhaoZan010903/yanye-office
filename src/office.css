@@ -10,3 +10,34 @@
 .office-custom-font { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px; }
 .office-custom-font input { width:126px; }
 .office-custom-font small { color:#68665f; }
+
+[data-office-workspace=true] { --office-chrome:#eef1f4; }
+.documents-row { min-width:0; flex:none; }
+.office-documents-row { display:flex; align-items:center; background:var(--office-chrome); border-bottom:1px solid var(--color-hairline); min-width:0; }
+.office-documents-row .disk-tabs { flex:1; border:0; }
+.office-document-tools { flex:none; }
+[data-office-workspace=true] .disk-tabs { background:var(--office-chrome); padding:3px 8px 0; gap:2px; }
+[data-office-workspace=true] .disk-tab { max-width:220px; }
+[data-office-workspace=true] .disk-tab[aria-current=page]::after { display:none; }
+[data-office-workspace=true] .disk-tab button:first-child { overflow:hidden; }
+[data-office-workspace=true] .office-heading {
+  min-height:34px; padding:1px 12px; gap:6px; background:var(--office-chrome);
+  border-bottom:0; color:var(--color-ink);
+}
+[data-office-workspace=true] .office-heading > .file-glyph { width:17px; height:17px; margin-inline-start:8px; }
+[data-office-workspace=true] .office-heading input { font-size:13px; font-weight:500; text-overflow:ellipsis; }
+[data-office-workspace=true] .office-heading .icon-button { width:26px; height:26px; color:inherit; }
+.office-file-bar { display:flex; align-items:center; flex:none; gap:2px; }
+.office-file-trigger { display:inline-flex; align-items:center; gap:5px; background:transparent; border:0; border-radius:4px; padding:4px 7px; font:500 13px/1.5 var(--font-sans,system-ui); }
+.office-file-trigger:hover { background:var(--color-hover-grey); }
+.office-command-divider { height:16px; width:1px; margin:0 4px; background:#d9dce0; }
+.office-file-menu {
+  position:fixed; inset:auto; position-area:bottom span-right; margin:4px 0 0; padding:4px;
+  min-width:210px; background:white; color:var(--color-ink); border:1px solid var(--color-hairline);
+  border-radius:4px; box-shadow:0 8px 24px rgba(15,15,15,.12);
+}
+.office-file-menu:popover-open { display:grid; }
+.office-file-menu button { display:flex; align-items:center; gap:8px; font:inherit; font-size:13px; color:inherit; background:none; border:0; border-radius:4px; padding:7px 8px; text-align:left; }
+.office-file-menu button:last-child { border-top:1px solid var(--color-hairline); }
+.office-file-menu button:enabled:hover,.office-file-menu button:focus-visible { background:var(--color-hover-grey); }
+.office-file-menu kbd { margin-inline-start:auto; font:inherit; font-size:11px; color:var(--muted); }

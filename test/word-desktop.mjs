@@ -114,7 +114,7 @@ try {
   await page.getByLabel('字号',{exact:true}).selectOption('15')
   await page.getByLabel('荧光标记').selectOption('yellow')
   await button('上标').click()
-  await button('布局').click()
+  await page.getByRole('tab',{name:'页面',exact:true}).click()
   await page.getByLabel('首行缩进').selectOption('2')
   await page.getByLabel('段前间距').selectOption('6')
   await page.getByLabel('段后间距').selectOption('12')

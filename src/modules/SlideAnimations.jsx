@@ -2,10 +2,14 @@ import React,{forwardRef,useImperativeHandle,useLayoutEffect,useRef,useState} fr
 import {animationNames,effectGroups,expandedEffects,slideTargets,targetText,triggerNames} from './slide-animations.js'
 import SlideMotionEditor from './SlideMotionEditor.jsx'
 import {defaultCurve,parseMotion,pathFrames} from './slide-motion.js'
+import {RibbonGroup} from '../office/Ribbon'
+import {ListOrdered,Play, Sparkles} from 'lucide-react'
 
-export function AnimationPanel({slide,onChange}) {
+export function AnimationPanel({slide,onChange,onPreview}) {
   const targets=slideTargets(slide), effects=slide.animations||[]
   const [picked,setPicked]=useState('title')
+  const [preset,setPreset]=useState('fade')
+  const [pane,setPane]=useState(true)
   const target=targets.some(([key])=>key===picked)?picked:'title'
   const locked=slide.nativeTiming && !slide.nativeTiming.editable
   function update(index,patch) { onChange(effects.map((effect,i)=>i===index?{...effect,...patch}:effect)) }
@@ -17,9 +21,13 @@ export function AnimationPanel({slide,onChange}) {
   }
   return <section className="slide-animations" aria-label="对象动画">
     {locked && <p>此页含组合、路径或其他复杂时间线。可识别的效果可在放映时预览；原始时间线随对象保留。</p>}
-    <fieldset disabled={locked}><label>动画对象<select value={target} onChange={e=>setPicked(e.target.value)}>{targets.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
-      <button onClick={()=>onChange([...effects,{id:crypto.randomUUID(),target,effect:'fade',trigger:'click',duration:500,delay:0,direction:'down',degrees:360}])}>添加动画</button>
-      {effects.length>0 && <ol>{effects.map((item,index)=><li key={item.id}>
+    <div className="slides-toolbar ribbon-panel"><RibbonGroup label="预览"><button type="button" className="slides-large-tool" onClick={onPreview}><Play size={20}/>从本页预览</button></RibbonGroup>
+      <RibbonGroup label="动画效果"><div className="slides-tool-stack"><label>对象<select aria-label="动画对象" disabled={locked} value={target} onChange={e=>setPicked(e.target.value)}>{targets.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+      <label>效果<select aria-label="待添加的动画效果" disabled={locked} value={preset} onChange={e=>setPreset(e.target.value)}>{Object.entries(animationNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label></div>
+      <button type="button" disabled={locked} className="slides-large-tool" onClick={()=>{setPane(true);onChange([...effects,{id:crypto.randomUUID(),target,effect:preset,trigger:'click',duration:500,delay:0,direction:'down',degrees:360,...(preset==='path'?{path:defaultCurve}:{})}])}}><Sparkles size={20}/>添加动画</button>
+      </RibbonGroup><RibbonGroup label="高级动画"><button type="button" className="slides-large-tool" aria-pressed={pane} onClick={()=>setPane(!pane)}><ListOrdered size={20}/>动画窗格</button></RibbonGroup>
+    </div>
+    <fieldset disabled={locked}>{pane && effects.length>0 && <ol>{effects.map((item,index)=><li key={item.id}>
         <span>{targets.find(([id])=>id===item.target)?.[1]}</span>
         <select aria-label={'动画效果 '+(index+1)} value={item.effect} onChange={e=>{
           const effect=e.target.value

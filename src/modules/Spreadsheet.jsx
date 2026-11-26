@@ -1,6 +1,6 @@
 import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, Bold, ChevronDown, FileDown, FileUp, Filter, Italic, Plus, Redo2, Strikethrough, Table2, Underline, Undo2 } from 'lucide-react'
+import { ArrowDownAZ, BarChart3, Bold, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, FileDown, FileUp, Filter, Grid2X2, IndentDecrease, IndentIncrease, Italic, MessageSquarePlus, MessageSquareX, Percent, Plus, Redo2, Rows3, Sigma, Strikethrough, Table2, Underline, Undo2, WrapText } from 'lucide-react'
 import {
   address, columnName, csvText, emptyWorkbook, evaluator, fillFrom, formatted, LIMITS, newSheet, parseDelimited,
   bounds, changeBorders, changeCellStyle, copyRange, delimitedText, findMerge, intersects, location, mergeRange, numberFormats, pasteRange, rangeName, removeSheet, renameSheet, shiftGrid, unmergeRange, writeRange,
@@ -8,6 +8,8 @@ import {
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
 import FontPicker from './FontPicker.jsx'
 import SheetRules from './SheetRules.jsx'
+import SheetPageControls from './SheetPageControls.jsx'
+import SheetNoteEditor from './SheetNoteEditor.jsx'
 import SheetPivot, { PivotSlicers } from './SheetPivot.jsx'
 import { refreshReports } from './sheet-pivot-refresh.js'
 import { editsPivotResults } from './sheet-pivot.js'
@@ -90,7 +92,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const [scroll, setScroll] = useState(0)
   const [height, setHeight] = useState(450)
   const [tab, setTab] = useState('开始')
-  const [gridlines,setGridlines] = useState(true)
+  const [noteOpen,setNoteOpen] = useState(false)
   const [formulaVisible,setFormulaVisible] = useState(true)
   const [widthEditor, setWidthEditor] = useState(false)
   const [ruleMode,setRuleMode]=useState('')
@@ -105,6 +107,8 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const range = bounds({row,col},{row:endRow,col:endCol})
   const style = sheet.styles?.[selected] ?? {}
   const raw = sheet.cells[selected] ?? ''
+  const note = sheet.notes?.[selected]
+  const noteRefs = useMemo(()=>Object.keys(sheet.notes || {}).map(location).sort((a,b)=>a.row-b.row || a.col-b.col),[sheet.notes])
   const choices=listChoices(validationAt(sheet,row,col))
   const compiledRules=useMemo(()=>conditionRules(sheet),[sheet.conditions])
   const nativeFilter=sheet.autoFilter
@@ -134,15 +138,28 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }, [sheet,display,sort,filter])
   const heights = useMemo(()=>{
     const values=Array(sheet.rows).fill(rowHeight)
+    let measure
     for (const [ref,style] of Object.entries(sheet.styles ?? {})) {
+      const {row:r,col:c}=location(ref)
       if (style.size) {
-        const r=location(ref).row
         values[r]=Math.max(values[r],Math.ceil(style.size*1.7)+4)
+      }
+      if (style.wrap && sheet.cells[ref] && !sheet.heights?.[r]) {
+        measure ??= document.createElement('canvas').getContext('2d')
+        if (!measure) continue
+        const size=style.size || 10
+        const merged=findMerge(sheet,r,c)
+        let width=0
+        for (let i=c;i<=(merged?.right ?? c);i++) width+=sheet.widths?.[i] ? Math.max(15,Math.round(sheet.widths[i]*7+5)) : 104
+        measure.font=(style.bold?'bold ':'')+size+'pt '+(style.font || '"Segoe UI",sans-serif')
+        const lines=String(formatted(display(sheet,ref),sheet.formats?.[ref])).split(/\r?\n/).reduce((n,s)=>
+          n+Math.max(1,Math.ceil(measure.measureText(s).width/Math.max(1,width-15-(style.indent || 0)*12))),0)
+        values[r]=Math.max(values[r],Math.min(545,Math.ceil(lines*size*1.85)+5))
       }
     }
     for (const [r,pt] of Object.entries(sheet.heights ?? {})) values[r]=Math.max(12,Math.round(pt*4/3))
     return values
-  },[sheet.rows,sheet.heights,sheet.styles])
+  },[sheet,display])
   const offsets = useMemo(()=>{
     const values=[0]
     for (const r of allRows) values.push(values.at(-1)+heights[r])
@@ -201,9 +218,56 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }
   function applyStyle(patch) { updateSheet(changeCellStyle(sheet,rangeRows,range.left,range.right,patch)) }
   function updateSheet(next) {
-    if(editsPivotResults(sheet,next)) {setNotice('透视结果由源数据生成，请修改源单元格后刷新。');return}
+    if(editsPivotResults(sheet,next)) {setNotice('透视结果由源数据生成，请修改源单元格后刷新。');return false}
     const current = latest.current
-    change({ ...current, sheets:current.sheets.map(s=>s.id===next.id ? next : s) })
+    return change({ ...current, sheets:current.sheets.map(s=>s.id===next.id ? next : s) })
+  }
+  function navigateNote(direction) {
+    const order=new Map(allRows.map((r,i)=>[r,i]))
+    const visible=noteRefs.filter(p=>order.has(p.row))
+    const position=p=>(order.get(p.row) ?? -1)*sheet.cols+p.col
+    visible.sort((a,b)=>position(a)-position(b))
+    const from=position({row,col})
+    const dest=direction>0 ? visible.find(p=>position(p)>from) || visible[0] : visible.findLast(p=>position(p)<from) || visible.at(-1)
+    if (dest) go(dest.row,dest.col)
+    else setNotice('当前筛选范围内没有批注。')
+  }
+  function saveNote(next) {
+    const notes={...sheet.notes}
+    if (next) notes[selected]=next
+    else delete notes[selected]
+    if (updateSheet({...sheet,notes})) setNoteOpen(false)
+  }
+  function selectionText() {
+    return delimitedText(rangeRows.map(r=>Array.from({length:range.right-range.left+1},(_,i)=>display(sheet,address(r,range.left+i)))),'\t')
+  }
+  async function copySelection() {
+    const previous=clipboard.current
+    scroller.current?.focus()
+    try {
+      if (document.execCommand('copy') && clipboard.current !== previous) return
+      await navigator.clipboard.writeText(selectionText())
+    } catch { setNotice('请在工作表中按 Ctrl+C 复制选区。') }
+  }
+  function pasteCells(matrix,internal) {
+    if ((sort || filter || Object.keys(nativeFilter?.columns??{}).length) && matrix.length>1) throw Error('请还原行序并清除筛选，再粘贴多行。')
+    updateSheet((internal ? pasteRange : writeRange)(sheet,rangeRows[0],range.left,matrix))
+    setEditing(false)
+  }
+  async function pasteValues() {
+    const previous=latest.current
+    try {
+      const text=await navigator.clipboard.readText()
+      if (text && mounted.current && latest.current===previous) tryAction(()=>pasteCells(parseDelimited(text,'\t'),false))
+    } catch { setNotice('无法读取系统剪贴板。请在工作表中按 Ctrl+V 粘贴。') }
+  }
+  function aggregate(name) {
+    tryAction(()=>{
+      if (sort || filter || Object.keys(nativeFilter?.columns??{}).length) throw Error('请还原行序并清除筛选，再对连续区域汇总。')
+      const dest=address(range.bottom+1,range.left)
+      if (sheet.cells[dest] || findMerge(sheet,range.bottom+1,range.left)) throw Error('选区下方已有内容或合并单元格，请预留一个空位。')
+      if (updateSheet(writeRange(sheet,range.bottom+1,range.left,[['='+name+'('+rangeName(range)+')']]))) setNotice('已在 '+dest+' 插入 '+name+'。')
+    })
   }
   function tryAction(fn) {
     try { setNotice(''); fn() } catch (error) { setNotice(error.message) }
@@ -279,7 +343,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       if (event.key==='ArrowUp') r=allRows[Math.max(0,allRows.indexOf(merge?.top ?? r)-1)]
       go(r,c,true,event.shiftKey)
     }
-    else if (event.key === 'F2') { event.preventDefault(); startEditing() }
+    else if (event.key === 'F2') { event.preventDefault(); if (event.shiftKey) setNoteOpen(true); else startEditing() }
     else if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       const cells = {...sheet.cells}
@@ -327,7 +391,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     } catch (error) { if (mounted.current) setNotice(error.message) }
     finally { if (mounted.current) setBusy(false) }
   }
-  return <section className="sheet-module" data-gridlines={gridlines} aria-label="电子表格"
+  return <section className="sheet-module" data-gridlines={sheet.showGridLines!==false} aria-label="电子表格"
     onKeyDownCapture={event=>{
       if (event.key!=='F5' || !event.altKey || event.shiftKey || event.metaKey || event.nativeEvent.isComposing ||
           !(event.ctrlKey ? book.sheets.some(s=>s.pivot) : sheet.pivot)) return
@@ -335,12 +399,100 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       event.stopPropagation()
       if (!event.repeat) refreshSelection(event.ctrlKey)
     }}>
-    <Ribbon label="表格" tabs={['开始','插入','公式','数据','视图','文件']} active={tab}
-      onChange={next=>{setTab(next);setWidthEditor(false);setRuleMode('');setFilterOpen(false);setPivotOpen(false)}}/>
-    {tab!=='公式' && <div className="sheet-toolbar ribbon-panel">
-      {tab==='开始' && <><RibbonGroup label="编辑">
+    <Ribbon label="表格" tabs={['开始','插入','页面布局','公式','数据','审阅','视图','导入导出']} active={tab}
+      onChange={next=>{setTab(next);setWidthEditor(false);setRuleMode('');setFilterOpen(false);setPivotOpen(false)}}>
       <button className="sheet-action" aria-label="撤销表格操作" title="撤销 Ctrl+Z" disabled={!history.current.past.length} onClick={()=>undo()}><Undo2 size={15}/></button>
       <button className="sheet-action" aria-label="重做表格操作" title="重做 Ctrl+Y" disabled={!history.current.future.length} onClick={()=>undo(true)}><Redo2 size={15}/></button>
+    </Ribbon>
+    <div className="sheet-toolbar sheet-format ribbon-panel" role="toolbar" aria-label={tab==='开始'?'选区格式':tab+'工具'}>
+      {tab==='页面布局' && <SheetPageControls sheet={sheet} range={range} apply={updateSheet}/>}
+      {tab==='数据' && <><RibbonGroup label="排序与筛选">
+      <button className="sheet-action" disabled={verticalMerges} title={'按 '+columnName(col)+' 列升序排列'} onClick={()=>updateSheet({...sheet,sort:{col,desc:false}})}><ArrowDownAZ size={16}/>升序</button>
+      <SheetMenu label="排序与筛选" icon={Filter}>
+        <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:false}})}>按 {columnName(col)} 列升序</button>
+        <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:true}})}>按 {columnName(col)} 列降序</button>
+        <button disabled={!sort} onClick={()=>updateSheet({...sheet,sort:null})}>还原行序</button>
+        <button disabled={verticalMerges} onClick={()=>setFilterOpen(true)}>筛选行</button>
+        <button disabled={verticalMerges || (!nativeFilter && range.top===range.bottom)} onClick={()=>updateSheet({...sheet,autoFilter:nativeFilter?null:{box:range,columns:{}}})}>{nativeFilter?'关闭范围自动筛选':'对选区启用自动筛选'}</button>
+        {verticalMerges && <small>先拆分跨行合并的单元格再筛选或排序。</small>}
+      </SheetMenu>
+      </RibbonGroup><RibbonGroup label="数据工具"><SheetMenu label="数据规则">
+        <button onClick={()=>setRuleMode('list')}>下拉列表验证</button>
+        <button onClick={()=>setRuleMode('condition')}>数值条件格式</button>
+      </SheetMenu>
+      </RibbonGroup></>}
+      {tab==='插入' && <RibbonGroup label="图表">
+      <button className="sheet-action" title="选择含表头的分类列与一个或多个数值列" aria-pressed={!!sheet.chart} onClick={()=>tryAction(()=>updateSheet({...sheet,chart:sheet.chart?null:newChart(range)}))}><BarChart3 size={15}/>柱状图</button>
+      </RibbonGroup>}
+      {tab==='插入' && <RibbonGroup label="行与列">
+        <button className="sheet-action" onClick={()=>structure('row',1)}><Rows3 size={16}/>插入行</button>
+        <button className="sheet-action" onClick={()=>structure('col',1)}>插入列</button>
+      </RibbonGroup>}
+      {(tab==='插入' || tab==='数据') && <RibbonGroup label="透视分析">
+        <button className="sheet-action" onClick={()=>setPivotOpen(v=>!v)}><Table2 size={16}/>{sheet.pivot?'透视表字段':'数据透视表'}</button>
+        {sheet.pivot && <button className="sheet-action" title="刷新当前数据透视表（Alt+F5）" aria-keyshortcuts="Alt+F5"
+          onClick={()=>refreshSelection(false)}>刷新数据透视表</button>}
+        {book.sheets.some(s=>s.pivot) && <button className="sheet-action" title="刷新全部数据透视表（Ctrl+Alt+F5）" aria-keyshortcuts="Control+Alt+F5"
+          onClick={()=>refreshSelection(true)}>全部刷新</button>}
+      </RibbonGroup>}
+      {(tab==='插入' || tab==='审阅') && <RibbonGroup label="批注">
+        <button className="sheet-action" aria-keyshortcuts="Shift+F2" title="Shift+F2" onClick={()=>setNoteOpen(true)}><MessageSquarePlus size={16}/>{note?'编辑批注':'新建批注'}</button>
+        {tab==='审阅' && <button className="sheet-action" disabled={!note} onClick={()=>saveNote(null)}><MessageSquareX size={16}/>删除批注</button>}
+      </RibbonGroup>}
+      {tab==='审阅' && <RibbonGroup label="浏览批注">
+        <button className="sheet-action" disabled={!noteRefs.length} onClick={()=>navigateNote(-1)}><ChevronLeft size={15}/>上一条批注</button>
+        <button className="sheet-action" disabled={!noteRefs.length} onClick={()=>navigateNote(1)}><ChevronRight size={15}/>下一条批注</button>
+      </RibbonGroup>}
+      {tab==='公式' && <RibbonGroup label="函数库">
+        <button className="sheet-action" aria-label="在选区下方插入求和" onClick={()=>aggregate('SUM')}><Sigma size={17}/>自动求和</button>
+        <SheetMenu label="常用函数">{[['平均值','AVERAGE'],['数值计数','COUNT'],['非空计数','COUNTA'],['最大值','MAX'],['最小值','MIN']].map(([label,fn])=>
+          <button key={fn} onClick={()=>aggregate(fn)}>{label} · {fn}</button>)}</SheetMenu>
+      </RibbonGroup>}
+      {tab==='视图' && <><RibbonGroup label="显示">
+        <label><input type="checkbox" checked={sheet.showGridLines!==false} onChange={e=>updateSheet({...sheet,showGridLines:e.target.checked})}/><Grid2X2 size={15}/>网格线</label>
+        <label><input type="checkbox" checked={formulaVisible} onChange={e=>setFormulaVisible(e.target.checked)}/>公式栏</label>
+      </RibbonGroup><RibbonGroup label="冻结窗格">
+        <button className="sheet-action" aria-pressed={!!sheet.freezeHeader} onClick={()=>updateSheet({...sheet,freezeHeader:!sheet.freezeHeader})}>冻结首行</button>
+        <button className="sheet-action" aria-pressed={!!sheet.freezeColumn} onClick={()=>updateSheet({...sheet,freezeColumn:!sheet.freezeColumn})}>冻结首列</button>
+      </RibbonGroup></>}
+      {tab==='导入导出' && <RibbonGroup label="工作簿交换">
+      <SheetMenu label="导入" icon={FileUp}><button disabled={busy} onClick={()=>exchange('csv',true)}>导入 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',true)}>导入 XLSX</button></SheetMenu>
+      <SheetMenu label="导出" icon={FileDown}><button disabled={busy} onClick={()=>exchange('csv',false)}>导出 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',false)}>导出 XLSX</button></SheetMenu>
+    </RibbonGroup>}
+    {tab==='开始' && <><RibbonGroup label="剪贴板">
+      <button title="复制选区 Ctrl+C" onClick={copySelection}><Copy size={16}/>复制</button>
+      <button title="将系统剪贴板文本粘贴到选区起点" onClick={pasteValues}><ClipboardPaste size={16}/>粘贴文本</button>
+      </RibbonGroup>
+      <RibbonGroup label="字体"><FontPicker label="选区字体" value={style.font || ''} defaultLabel="默认字体" useLocalNames onChange={font=>applyStyle({font})}/>
+      <select aria-label="选区字号" value={style.size || ''} onChange={e=>applyStyle({size:Number(e.target.value)})}>
+        <option value="">默认字号</option>{[...new Set([9,10,11,12,14,16,18,20,24,28,32,...(style.size ? [style.size] : [])])].sort((a,b)=>a-b).map(size=><option key={size} value={size}>{size} pt</option>)}
+      </select>
+      <button aria-pressed={!!style.bold} aria-label="加粗选区" title="加粗 Ctrl+B" onClick={()=>applyStyle({bold:!style.bold})}><Bold size={15}/></button>
+      <button aria-pressed={!!style.italic} aria-label="倾斜选区" title="倾斜 Ctrl+I" onClick={()=>applyStyle({italic:!style.italic})}><Italic size={15}/></button>
+      <button aria-pressed={!!style.underline} aria-label="选区下划线" title="下划线 Ctrl+U" onClick={()=>applyStyle({underline:style.underline ? null : 'single'})}><Underline size={15}/></button>
+      <button aria-pressed={!!style.strike} aria-label="选区删除线" title="删除线" onClick={()=>applyStyle({strike:!style.strike})}><Strikethrough size={15}/></button>
+      <label>字色<input type="color" aria-label="选区字体颜色" value={style.color ?? '#37352f'} onChange={e=>applyStyle({color:e.target.value.toUpperCase()})}/></label>
+      <label>底色<input type="color" aria-label="选区填充颜色" value={style.fill ?? '#ffffff'} onChange={e=>applyStyle({fill:e.target.value.toUpperCase()})}/></label>
+      </RibbonGroup><RibbonGroup label="对齐方式">
+      <select aria-label="选区水平对齐" value={style.align || ''} onChange={e=>applyStyle({align:e.target.value})}>
+        <option value="">自动对齐</option><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option>
+      </select>
+      <select aria-label="选区垂直对齐" value={style.vertical || ''} onChange={e=>applyStyle({vertical:e.target.value})}>
+        <option value="">垂直默认</option><option value="top">顶端对齐</option><option value="middle">垂直居中</option><option value="bottom">底端对齐</option>
+      </select>
+      <button aria-pressed={!!style.wrap} title="自动换行" onClick={()=>applyStyle({wrap:!style.wrap})}><WrapText size={15}/>自动换行</button>
+      <button aria-label="减少缩进" title="减少缩进" disabled={!style.indent} onClick={()=>applyStyle({indent:Math.max(0,(style.indent || 0)-1)})}><IndentDecrease size={15}/></button>
+      <button aria-label="增加缩进" title="增加缩进" disabled={style.indent>=15} onClick={()=>applyStyle({indent:(style.indent || 0)+1})}><IndentIncrease size={15}/></button>
+      <button disabled={range.top===range.bottom && range.left===range.right} onClick={()=>tryAction(()=>{
+        if (range.bottom>range.top && (sort || filter)) throw new Error('请还原行序并清除筛选，再合并多行。')
+        updateSheet(mergeRange(sheet,range)); go(range.top,range.left)
+      })}>合并单元格</button>
+      <button disabled={!sheet.merges?.some(box=>intersects(box,range))} onClick={()=>updateSheet(unmergeRange(sheet,range))}>取消合并</button>
+      </RibbonGroup><RibbonGroup label="数字">
+      <select aria-label="选区数字格式" value={sheet.formats?.[selected] || ''} onChange={e=>applyStyle({numberFormat:e.target.value})}>
+        <option value="">常规</option>{Object.entries(numberFormats).map(([key,[label]])=><option key={key} value={key}>{label}</option>)}</select>
+      <button title="人民币格式" aria-label="人民币格式" onClick={()=>applyStyle({numberFormat:'currency'})}>¥</button>
+      <button title="百分比格式" aria-label="百分比格式" onClick={()=>applyStyle({numberFormat:'percentWhole'})}><Percent size={15}/></button>
       </RibbonGroup><RibbonGroup label="单元格">
       <SheetMenu label="行与列" icon={Table2}>
         <button onClick={()=>structure('row',1)}>在上方插入行</button><button onClick={()=>structure('col',1)}>在左侧插入列</button>
@@ -360,74 +512,11 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         {[['全部框线','all'],['外侧框线','outline'],['清除边框','none']].map(([label,mode])=>
           <button key={mode} onClick={()=>updateSheet(changeBorders(sheet,rangeRows,range.left,range.right,mode))}>{label}</button>)}
       </SheetMenu>
-      </RibbonGroup></>}
-      {tab==='数据' && <RibbonGroup label="数据管理">
-      <SheetMenu label="排序与筛选" icon={Filter}>
-        <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:false}})}>按 {columnName(col)} 列升序</button>
-        <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:true}})}>按 {columnName(col)} 列降序</button>
-        <button disabled={!sort} onClick={()=>updateSheet({...sheet,sort:null})}>还原行序</button>
-        <button disabled={verticalMerges} onClick={()=>setFilterOpen(true)}>筛选行</button>
-        <button disabled={verticalMerges || (!nativeFilter && range.top===range.bottom)} onClick={()=>updateSheet({...sheet,autoFilter:nativeFilter?null:{box:range,columns:{}}})}>{nativeFilter?'关闭范围自动筛选':'对选区启用自动筛选'}</button>
-        {verticalMerges && <small>先拆分跨行合并的单元格再筛选或排序。</small>}
-      </SheetMenu>
-      <SheetMenu label="数据规则">
-        <button onClick={()=>setRuleMode('list')}>下拉列表验证</button>
-        <button onClick={()=>setRuleMode('condition')}>数值条件格式</button>
-      </SheetMenu>
-      </RibbonGroup>}
-      {tab==='插入' && <RibbonGroup label="图表">
-      <button className="sheet-action" title="选择含表头的分类列与一个或多个数值列" aria-pressed={!!sheet.chart} onClick={()=>tryAction(()=>updateSheet({...sheet,chart:sheet.chart?null:newChart(range)}))}><BarChart3 size={15}/>柱状图</button>
-      </RibbonGroup>}
-      {tab==='插入' && <RibbonGroup label="行与列">
-        <button className="sheet-action" onClick={()=>structure('row',1)}>插入行</button>
-        <button className="sheet-action" onClick={()=>structure('col',1)}>插入列</button>
-      </RibbonGroup>}
-      {(tab==='插入' || tab==='数据') && <RibbonGroup label="透视分析">
-        <button className="sheet-action" onClick={()=>setPivotOpen(v=>!v)}>{sheet.pivot?'透视表字段':'数据透视表'}</button>
-        {sheet.pivot && <button className="sheet-action" title="刷新当前数据透视表（Alt+F5）" aria-keyshortcuts="Alt+F5"
-          onClick={()=>refreshSelection(false)}>刷新数据透视表</button>}
-        {book.sheets.some(s=>s.pivot) && <button className="sheet-action" title="刷新全部数据透视表（Ctrl+Alt+F5）" aria-keyshortcuts="Control+Alt+F5"
-          onClick={()=>refreshSelection(true)}>全部刷新</button>}
-      </RibbonGroup>}
-      {tab==='视图' && <><RibbonGroup label="显示">
-        <label><input type="checkbox" checked={gridlines} onChange={e=>setGridlines(e.target.checked)}/>网格线</label>
-        <label><input type="checkbox" checked={formulaVisible} onChange={e=>setFormulaVisible(e.target.checked)}/>公式栏</label>
-      </RibbonGroup><RibbonGroup label="冻结窗格">
-        <button className="sheet-action" aria-pressed={!!sheet.freezeHeader} onClick={()=>updateSheet({...sheet,freezeHeader:!sheet.freezeHeader})}>冻结首行</button>
-        <button className="sheet-action" aria-pressed={!!sheet.freezeColumn} onClick={()=>updateSheet({...sheet,freezeColumn:!sheet.freezeColumn})}>冻结首列</button>
-      </RibbonGroup></>}
-      {tab==='文件' && <RibbonGroup label="工作簿交换">
-      <SheetMenu label="导入" icon={FileUp}><button disabled={busy} onClick={()=>exchange('csv',true)}>导入 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',true)}>导入 XLSX</button></SheetMenu>
-      <SheetMenu label="导出" icon={FileDown}><button disabled={busy} onClick={()=>exchange('csv',false)}>导出 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',false)}>导出 XLSX</button></SheetMenu>
-    </RibbonGroup>}</div>}
-    {tab==='开始' && <div className="sheet-format ribbon-panel" role="toolbar" aria-label="选区格式">
-      <RibbonGroup label="字体"><FontPicker label="选区字体" value={style.font || ''} defaultLabel="默认字体" useLocalNames onChange={font=>applyStyle({font})}/>
-      <select aria-label="选区字号" value={style.size || ''} onChange={e=>applyStyle({size:Number(e.target.value)})}>
-        <option value="">默认字号</option>{[...new Set([9,10,11,12,14,16,18,20,24,28,32,...(style.size ? [style.size] : [])])].sort((a,b)=>a-b).map(size=><option key={size} value={size}>{size} pt</option>)}
-      </select>
-      <button aria-pressed={!!style.bold} aria-label="加粗选区" title="加粗 Ctrl+B" onClick={()=>applyStyle({bold:!style.bold})}><Bold size={15}/></button>
-      <button aria-pressed={!!style.italic} aria-label="倾斜选区" title="倾斜 Ctrl+I" onClick={()=>applyStyle({italic:!style.italic})}><Italic size={15}/></button>
-      <button aria-pressed={!!style.underline} aria-label="选区下划线" title="下划线 Ctrl+U" onClick={()=>applyStyle({underline:style.underline ? null : 'single'})}><Underline size={15}/></button>
-      <button aria-pressed={!!style.strike} aria-label="选区删除线" title="删除线" onClick={()=>applyStyle({strike:!style.strike})}><Strikethrough size={15}/></button>
-      <label>字色<input type="color" aria-label="选区字体颜色" value={style.color ?? '#37352f'} onChange={e=>applyStyle({color:e.target.value.toUpperCase()})}/></label>
-      <label>底色<input type="color" aria-label="选区填充颜色" value={style.fill ?? '#ffffff'} onChange={e=>applyStyle({fill:e.target.value.toUpperCase()})}/></label>
-      </RibbonGroup><RibbonGroup label="对齐与格式">
-      <select aria-label="选区水平对齐" value={style.align || ''} onChange={e=>applyStyle({align:e.target.value})}>
-        <option value="">自动对齐</option><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option>
-      </select>
-      <select aria-label="选区垂直对齐" value={style.vertical || ''} onChange={e=>applyStyle({vertical:e.target.value})}>
-        <option value="">垂直默认</option><option value="top">顶端对齐</option><option value="middle">垂直居中</option><option value="bottom">底端对齐</option>
-      </select>
-      <select aria-label="选区数字格式" value={sheet.formats?.[selected] || ''} onChange={e=>applyStyle({numberFormat:e.target.value})}>
-        <option value="">常规</option>{Object.entries(numberFormats).map(([key,[label]])=><option key={key} value={key}>{label}</option>)}
-      </select>
-      <button disabled={range.top===range.bottom && range.left===range.right} onClick={()=>tryAction(()=>{
-        if (range.bottom>range.top && (sort || filter)) throw new Error('请还原行序并清除筛选，再合并多行。')
-        updateSheet(mergeRange(sheet,range)); go(range.top,range.left)
-      })}>合并单元格</button>
-      <button disabled={!sheet.merges?.some(box=>intersects(box,range))} onClick={()=>updateSheet(unmergeRange(sheet,range))}>取消合并</button>
-      <button onClick={()=>applyStyle({bold:false,italic:false,underline:null,strike:false,color:null,fill:null,align:null,vertical:null,borders:null,font:null,size:null,numberFormat:null})}>清除格式</button>
-    </RibbonGroup></div>}
+      </RibbonGroup><RibbonGroup label="编辑">
+      <button onClick={()=>applyStyle({bold:false,italic:false,underline:null,strike:false,color:null,fill:null,align:null,vertical:null,wrap:null,indent:null,borders:null,font:null,size:null,numberFormat:null})}>清除格式</button>
+    </RibbonGroup></>}</div>
+    {tab==='审阅' && note && <aside className="sheet-note-preview" aria-label="当前批注"><strong>{selected} · {note.author}</strong><span>{note.text}</span></aside>}
+    {noteOpen && <SheetNoteEditor address={selected} note={note} close={()=>setNoteOpen(false)} save={saveNote}/>}
     {widthEditor && <form className="sheet-filter" onSubmit={e=>{
       e.preventDefault()
       const size=Number(e.currentTarget.elements.size.value)
@@ -445,18 +534,11 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       <label>{widthEditor==='col' ? '列宽（字符）' : '行高（磅）'} <input key={widthEditor} type="number" name="size" min={widthEditor==='col'?1:9} max={widthEditor==='col'?255:409} step="any" required autoFocus defaultValue={widthEditor==='col' ? sheet.widths?.[col] ?? 14 : sheet.heights?.[row] ?? 22.5}/></label>
       <button>应用{widthEditor==='col'?'列宽':'行高'}</button><button type="button" onClick={()=>setWidthEditor(false)}>取消</button>
     </form>}
-    {tab==='公式' && <div className="sheet-functions">
-      <button onClick={()=>tryAction(()=>{
-        if (sort || filter) throw new Error('请还原行序并清除筛选，再对连续区域求和。')
-        const dest=address(range.bottom+1,range.left)
-        if (sheet.cells[dest] || findMerge(sheet,range.bottom+1,range.left)) throw new Error('选区下方已有内容或合并单元格，请预留一个空位。')
-        updateSheet(writeRange(sheet,range.bottom+1,range.left,[['=SUM('+rangeName(range)+')']]))
-      })}>在选区下方插入求和</button>
-      <strong>在公式栏输入函数</strong>
+    {tab==='公式' && <details className="sheet-function-help"><summary>公式输入示例</summary><div className="sheet-functions">
       <code>=IF(B2&gt;=60,"通过","复核")</code><code>=COUNTIF(B2:B12,"&gt;=60")</code><code>=SUMIF(A2:A12,"差旅",B2:B12)</code>
       <code>=SUMIFS(C2:C12,A2:A12,"差旅",B2:B12,"已批")</code><code>=IFERROR(VLOOKUP(A2,价目!A2:C20,3,FALSE),"未找到")</code>
       <span>支持 COUNTIFS、多条件求和、通配符和跨表查找。VLOOKUP 精确查找用 FALSE；近似查找须按首列升序。每个引用区域最多 50,000 格，整列引用和动态数组暂不支持。</span>
-    </div>}
+    </div></details>}
     {removing===sheet.id && <div className="sheet-filter" role="alert"><span>删除“{sheet.name}”后，引用此表的公式将显示 #REF!。</span>
       <button onClick={()=>{change(removeSheet(book,sheet.id));setRemoving(null);select({row:0,col:0});setEditing(false)}}>确认删除工作表</button>
       <button onClick={()=>setRemoving(null)}>取消</button>
@@ -488,7 +570,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         const token=crypto.randomUUID()
         clipboard.current={token, cells:copyRange(sheet,rangeRows,range.left,range.right)}
         e.clipboardData.setData('application/x-yanye-range',token)
-        e.clipboardData.setData('text/plain',delimitedText(rangeRows.map(r=>Array.from({length:range.right-range.left+1},(_,i)=>display(sheet,address(r,range.left+i)))),'\t'))
+        e.clipboardData.setData('text/plain',selectionText())
       }}}
       onPaste={e=>{
         const data = e.clipboardData.getData('text/plain')
@@ -497,9 +579,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
           const saved = clipboard.current
           const internal = saved && e.clipboardData.getData('application/x-yanye-range')===saved.token
           const matrix = internal ? saved.cells : parseDelimited(data,'\t')
-          if ((sort || filter || Object.keys(nativeFilter?.columns??{}).length) && matrix.length>1) throw new Error('请还原行序并清除筛选，再粘贴多行。')
-          const paste = internal ? pasteRange : writeRange
-          updateSheet(paste(sheet,rangeRows[0],range.left,matrix)); setEditing(false)
+          pasteCells(matrix,internal)
         })
       }}>
       <table aria-label={sheet.name} className={sheet.freezeColumn?'sheet-freeze-column':''} style={{width:44+widths.reduce((a,b)=>a+b,0)}}><colgroup><col style={{width:44}}/>{cols.map(c=><col key={c} style={{width:widths[c]}}/>)}</colgroup>
@@ -514,7 +594,9 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
               const ref = address(rr,cc), active = rr===row && cc===col
               const cellStyle=sheet.styles?.[ref] ?? {}
               const result = display(sheet,ref)
-              return <td key={c} data-address={ref} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
+              const cellNote=sheet.notes?.[ref]
+              return <td key={c} data-address={ref} data-note={cellNote?true:undefined} data-wrap={cellStyle.wrap || undefined}
+                title={cellNote?cellNote.author+'：'+cellNote.text:undefined} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
                 style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:conditionalFill(compiledRules,rr,cc,result)??cellStyle.fill,textAlign:cellStyle.align,
                   paddingInlineStart:cellStyle.indent?4+cellStyle.indent*12:undefined,verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
                   textDecorationStyle:String(cellStyle.underline).startsWith('double') ? 'double' : undefined,...cellBorders(cellStyle.borders)}}

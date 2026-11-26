@@ -1,0 +1,5 @@
+.word-line-controls { display:grid; align-items:start; gap:3px; }
+.word-line-controls input[type=number] { width:4.4em; }
+.word-line-controls small { max-width:14em; color:#69675f; }
+.word-line-numbers { position:absolute; inset:0; pointer-events:none; user-select:none; overflow:hidden; }
+.word-line-numbers span { position:absolute; white-space:nowrap; font:9pt/1.25 "Segoe UI",sans-serif; font-variant-numeric:tabular-nums; color:#726f69; }

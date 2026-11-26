@@ -1,4 +1,4 @@
-import { base64Bytes, decodeText, detectEncoding, encodeText, textModel } from './modules/plain-text.js'
+import { base64, base64Bytes, decodeText, detectEncoding, encodeText, legacyChinese, textModel } from './modules/plain-text.js'
 
 export const fileTypes = Object.freeze({
   docx: { kind: 'word', label: 'Word 文档', initialName: '新建文档' },
@@ -38,8 +38,14 @@ export async function readOfficeFile(file, chooseEncoding) {
       const bytes = base64Bytes(content)
       const encoding = detectEncoding(bytes) || await chooseEncoding(bytes, file.name)
       if (!encoding) return null
-      try { return { content:decodeText(bytes, encoding) } }
+      let model
+      try { model=decodeText(bytes,encoding) }
       catch { throw new Error('文件中有无法按所选编码读取的字节，请重新打开并选择编码。') }
+      if (legacyChinese(encoding)) {
+        const {hasOriginalMapping}=await import('./modules/legacy-text.js')
+        if (!await hasOriginalMapping(model,bytes)) model.noncanonicalEncoding=encoding
+      }
+      return {content:model}
     }
     case 'docx': {
       const { readDocx } = await import('./modules/word-docx.js')
@@ -62,6 +68,10 @@ export async function writeOfficeFile(page) {
   switch (pageExtension(page)) {
     case 'md': return page.markdown
     case 'txt': {
+      if (legacyChinese(page.content?.encoding)) {
+        const {legacyBytes}=await import('./modules/legacy-text.js')
+        return base64(await legacyBytes(page.content))
+      }
       return encodeText(page.content)
     }
     case 'docx': {

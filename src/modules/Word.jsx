@@ -6,7 +6,10 @@ import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TableKit } from '@tiptap/extension-table'
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FileDown, ImagePlus, Italic, List, ListOrdered, Redo2, Search, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from 'lucide-react'
-import { findText, highlights, maxImageBytes, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import { findText, highlights, maxImageBytes, paperDimensions, papers, validColor, validFont, wordValue } from './word-model.js'
+import { bandPrintStyles, pageBand } from './word-bands.js'
+import WordBands from './WordBands.jsx'
+import WordComments,{WordComment} from './WordComments.jsx'
 import FontPicker from './FontPicker.jsx'
 import './word.css'
 
@@ -82,7 +85,7 @@ const LocalImage=Image.extend({
   renderHTML({HTMLAttributes}) { return ['img',mergeAttributes(HTMLAttributes,{draggable:'false'})] },
 }).configure({allowBase64:true,inline:true})
 
-const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,ParagraphFormat,PageBreak,LocalImage,TableKit]
+const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,WordComment,ParagraphFormat,PageBreak,LocalImage,TableKit]
 const pointNames={42:'初号',36:'小初',26:'一号',24:'小一',22:'二号',18:'小二',16:'三号',15:'小三',14:'四号',12:'小四',10.5:'五号',9:'小五',7.5:'六号',6.5:'小六',5.5:'七号',5:'八号'}
 const sizes=[8,10,11,20,28,32,48,72,...Object.keys(pointNames).map(Number)]
 const aligns=[['left','左对齐',AlignLeft],['center','居中对齐',AlignCenter],['right','右对齐',AlignRight],['justify','两端对齐',AlignJustify]]
@@ -106,6 +109,7 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   const latest=useRef(current), callback=useRef(onChange), accepted=useRef(current.doc)
   latest.current=current; callback.current=onChange
   const [tab,setTab]=useState('开始'), [message,setMessage]=useState(''), [searching,setSearching]=useState(false)
+  const [bandsOpen,setBandsOpen]=useState(false)
   const [term,setTerm]=useState(''), [replacement,setReplacement]=useState('')
   const [print,setPrint]=useState(null), [printing,setPrinting]=useState(false)
   const [rows,setRows]=useState(3), [columns,setColumns]=useState(3), [zoom,setZoom]=useState(100)
@@ -191,13 +195,19 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   if (!editor || !format) return null
   const activeFont=format.run.font ?? 'Microsoft YaHei', activeSize=Number(format.run.size) || 11
   const marginText=[layout.top,layout.right,layout.bottom,layout.left].map(v=>v+'mm').join(' ')
+  const firstType=layout.differentFirst?'first':'default'
+  function bandPreview(kind) {
+    const band=pageBand(layout,firstType,kind)
+    return band.text && <div className={'word-band-preview word-'+kind} style={{textAlign:band.align}}
+      title={kind==='header'?'页眉':'页脚'}>{band.text.replaceAll('{{PAGE}}','1').replaceAll('{{NUMPAGES}}','…')}</div>
+  }
   const customMargin=![12.7,25.4,38.1].some(n=>[layout.top,layout.right,layout.bottom,layout.left].every(v=>Math.abs(v-n)<0.06))
   return <section className="word-editor" aria-label="文字处理">
-    <div className="word-tabs">{['开始','插入','布局'].map(t=><button key={t} type="button" aria-pressed={tab===t} onClick={()=>setTab(t)}>{t}</button>)}
+    <div className="word-tabs">{['开始','插入','布局','审阅'].map(t=><button key={t} type="button" aria-pressed={tab===t} onClick={()=>setTab(t)}>{t}</button>)}
       <span className="word-spacer"/><Action label="查找替换" icon={Search} onClick={()=>{setSearching(!searching);requestAnimationFrame(()=>searchRef.current?.focus())}}/>
       <Action label="导出 PDF" icon={FileDown} onClick={printPdf} disabled={printing || !onPrintPdf}/>
     </div>
-    <div className="word-tools" role="toolbar" aria-label={tab+'工具'}>
+    {tab!=='审阅' && <div className="word-tools" role="toolbar" aria-label={tab+'工具'}>
       {tab==='开始' && <>
         <Action compact icon={Undo2} label="撤销" onClick={()=>run('undo')} disabled={!format.undo}/><Action compact icon={Redo2} label="重做" onClick={()=>run('redo')} disabled={!format.redo}/>
         <span className="word-divider"/>
@@ -220,6 +230,7 @@ export default function Word({value, onChange, onPrintPdf, title}) {
           {[...new Set([1,1.25,1.5,2,format.spacing])].sort((a,b)=>a-b).map(n=><option key={n}>{n}</option>)}</select></label>
       </>}
       {tab==='插入' && <>
+        <Action label="页眉页脚" pressed={bandsOpen} onClick={()=>setBandsOpen(!bandsOpen)}/>
         <label>行 <input aria-label="表格行数" type="number" min="1" max="30" value={rows} onChange={e=>setRows(e.target.value)}/></label>
         <label>列 <input aria-label="表格列数" type="number" min="1" max="12" value={columns} onChange={e=>setColumns(e.target.value)}/></label>
         <Action label="插入表格" icon={Table2} disabled={!Number.isInteger(+rows)||+rows<1||+rows>30||!Number.isInteger(+columns)||+columns<1||+columns>12} onClick={()=>run('insertTable',{rows:+rows,cols:+columns,withHeaderRow:true})}/>
@@ -237,12 +248,15 @@ export default function Word({value, onChange, onPrintPdf, title}) {
           return <label key={key}>{label}<select aria-label={label+'间距'} value={current ?? ''} onChange={e=>paragraphPatch({[key]:e.target.value==='' ? null : Number(e.target.value)})}>
             <option value="">样式默认</option>{[...new Set([0,3,6,9,12,18,24,...(Number.isFinite(current)?[current]:[])])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n} pt</option>)}</select></label>
         })}
-        <label>纸张 <select aria-label="纸张大小" value={layout.paper} onChange={e=>changeLayout({paper:e.target.value})}><option>A4</option><option>Letter</option></select></label>
+        <label>纸张 <select aria-label="纸张大小" value={layout.paper} onChange={e=>changeLayout({paper:e.target.value})}>
+          {Object.keys(papers).map(p=><option key={p}>{p}</option>)}{layout.paper==='custom'&&<option value="custom">文档自定义</option>}</select></label>
         <label>方向 <select aria-label="纸张方向" value={layout.landscape?'landscape':'portrait'} onChange={e=>changeLayout({landscape:e.target.value==='landscape'})}><option value="portrait">纵向</option><option value="landscape">横向</option></select></label>
         <label>页边距 <select aria-label="页边距" value={customMargin?'custom':[12.7,25.4,38.1].find(n=>Math.abs(layout.top-n)<0.06)} onChange={e=>{const n=Number(e.target.value);changeLayout({top:n,bottom:n,left:n,right:n})}}>
           <option value="12.7">窄 · 1.27 厘米</option><option value="25.4">普通 · 2.54 厘米</option><option value="38.1">宽 · 3.81 厘米</option>{customMargin && <option value="custom">文档自定义</option>}</select></label>
       </>}
-    </div>
+    </div>}
+    {bandsOpen && tab==='插入' && <WordBands layout={layout} onChange={changeLayout}/>}
+    {tab==='审阅' && <WordComments editor={editor}/>}
     {searching && <div className="word-find"><input ref={searchRef} aria-label="查找文字" placeholder="查找文字" value={term} onChange={e=>setTerm(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')search('next')}}/>
       <input aria-label="替换文字" placeholder="替换为" value={replacement} onChange={e=>setReplacement(e.target.value)}/>
       {[['下一处','next'],['替换当前','one'],['全部替换','all']].map(([label,key])=><Action key={key} label={label} disabled={!term} onClick={()=>search(key)}/>)}
@@ -251,12 +265,12 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     {message && <p role="status" className="word-message">{message}<button onClick={()=>setMessage('')}>关闭提示</button></p>}
     <input hidden ref={fileRef} type="file" accept="image/png,image/jpeg" onChange={insertImage} aria-label="选择文档图片"/>
     <div className="word-scroll"><div className="word-sheet" style={{width:width+'mm',minHeight:height+'mm',padding:marginText,zoom:zoom/100}}>
-      <EditorContent editor={editor}/>
+      {bandPreview('header')}<EditorContent editor={editor}/>{bandPreview('footer')}
     </div></div>
     <div className="word-status"><span>{layout.paper} · {layout.landscape?'横向':'纵向'}</span><span>{format.chars} 字符</span><label>缩放 <select aria-label="文档缩放" value={zoom} onChange={e=>setZoom(Number(e.target.value))}>
       {[60,75,85,100,125,150].map(n=><option key={n} value={n}>{n}%</option>)}</select></label></div>
     {print!==null && createPortal(<div className="word-print-root">
-      <style>{'@media print { @page { size: '+width+'mm '+height+'mm; margin: '+marginText+'; } html,body { overflow:visible !important; height:auto !important; margin:0 !important; } body > :not(.word-print-root) {display:none !important;} .word-print-root {display:block !important;} }'}</style>
+      <style>{'@media print { @page { size: '+width+'mm '+height+'mm; margin: '+marginText+'; } '+bandPrintStyles(layout)+' html,body { overflow:visible !important; height:auto !important; margin:0 !important; } body > :not(.word-print-root) {display:none !important;} .word-print-root {display:block !important;} }'}</style>
       <div className="word-prose" dangerouslySetInnerHTML={{__html:print}}/>
     </div>,document.body)}
   </section>

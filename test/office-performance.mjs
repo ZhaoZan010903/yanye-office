@@ -140,7 +140,9 @@ try {
   }
   console.log(JSON.stringify({rounds,summary}))
   if (process.argv[4]) {
-    const report={executable:basename(executablePath),machine,fixtures:manifest,rounds,summary,warmup,samples:raw}
+    const version=JSON.parse(await readFile(join(root,'package.json'),'utf8')).version
+    const asarSha256=packaged ? digest(await readFile(join(dirname(executablePath),'resources','app.asar'))) : null
+    const report={version,asarSha256,executable:basename(executablePath),machine,fixtures:manifest,rounds,summary,warmup,samples:raw}
     await writeFile(resolve(process.argv[4]),JSON.stringify(report,null,2)+'\n')
   }
 } finally {

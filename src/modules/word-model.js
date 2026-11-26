@@ -1,4 +1,4 @@
-export const papers = { A4: [210, 297], Letter: [215.9, 279.4] }
+export const papers = { A4:[210,297], A3:[297,420], A5:[148,210], B5:[176,250], Letter:[215.9,279.4], Legal:[215.9,355.6] }
 export const blankDoc = { type: 'doc', content: [{ type: 'paragraph' }] }
 export const defaultLayout = { paper: 'A4', landscape: false, top: 25.4, bottom: 25.4, left: 25.4, right: 25.4 }
 
@@ -8,11 +8,21 @@ export function wordValue(value = {}) {
   for (const side of ['top', 'bottom', 'left', 'right']) {
     if (Number.isFinite(incoming[side])) layout[side] = Math.max(0, Math.min(65, incoming[side]))
   }
+  // Layout is persisted in the user's document. Keep older workspaces readable.
+  if (incoming.paper === 'custom' && Array.isArray(incoming.size) && incoming.size.length === 2 &&
+      incoming.size.every(n => Number.isFinite(n) && n >= 25 && n <= 560)) {
+    layout.paper = 'custom'
+    layout.size = incoming.size
+  }
+  if (incoming.bands && typeof incoming.bands === 'object') layout.bands = incoming.bands
+  if (incoming.differentFirst) layout.differentFirst = true
+  if (incoming.differentEven) layout.differentEven = true
+  for (const key of ['headerDistance','footerDistance']) if (Number.isFinite(incoming[key])) layout[key] = Math.max(0,Math.min(65,incoming[key]))
   return { doc: value?.doc?.type === 'doc' ? value.doc : blankDoc, layout, compatibility: value?.compatibility ?? [] }
 }
 
 export function paperDimensions(layout) {
-  const [width, height] = papers[layout.paper]
+  const [width, height] = layout.paper === 'custom' ? layout.size : papers[layout.paper]
   return layout.landscape ? [height, width] : [width, height]
 }
 

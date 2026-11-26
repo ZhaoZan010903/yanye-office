@@ -1,4 +1,5 @@
-import { newSlide, slideBoxes, slideThemes, textBox } from './slides-model.js'
+import { newSlide, shapeKinds, slideBoxes, slideShape, slideThemes, textBox } from './slides-model.js'
+import { parseTransition, transitionXml } from './slide-transition.js'
 
 const W = 40 / 3
 const H = 7.5
@@ -24,7 +25,11 @@ export async function exportPptx(deck, name) {
     const addText = (field, options) => slide.addText(item[field] || '', {
       ...baseText, ...pageBox(boxes[field]), ...options, objectName: 'YanYe ' + item.layout + ' ' + field,
     })
-    addText('title', { fontSize: item.layout === 'cover' ? 46 : 36, bold: true })
+    if (item.titleBox) {
+      const box=item.titleBox
+      slide.addText(item.title || '',{...baseText,...pageBox(box),fontSize:box.fontSize,fontFace:box.fontFace,color:box.color,
+        bold:box.bold,italic:box.italic,align:box.align,objectName:'YanYe '+item.layout+' positioned title'})
+    } else addText('title', { fontSize: item.layout === 'cover' ? 46 : 36, bold: true })
     addText('body', { fontSize: 22 })
     if (item.layout === 'columns') addText('side', { fontSize: 22 })
     if (item.layout === 'image' && item.image) {
@@ -35,12 +40,30 @@ export async function exportPptx(deck, name) {
       slide.addImage({ data: image.data, x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h, altText: image.name || '插图' })
     }
     if (item.notes) slide.addNotes(item.notes)
+    for (const shape of item.shapes || []) {
+      slide.addText(shape.text, { ...baseText, ...pageBox(shape), shape:shape.kind, rotate:shape.rotation,
+        fill:{color:shape.fill}, line:{color:shape.stroke,width:1}, color:shape.color, fontSize:shape.fontSize,
+        fontFace:shape.fontFace, bold:shape.bold, italic:shape.italic, align:'center', valign:'middle', objectName:'YanYe shape' })
+    }
     for (const box of item.textBoxes || []) {
       slide.addText(box.text, { ...baseText, ...pageBox(box), fontSize: box.fontSize, color: box.color,
+        fontFace:box.fontFace || baseText.fontFace, bold:box.bold, italic:box.italic, align:box.align,
         fit: undefined, objectName: 'YanYe text box' })
     }
   }
-  return file.write({ outputType: 'base64', compression: true })
+  const effects=deck.slides.map(item=>transitionXml(item.transition || {}))
+  if (!effects.some(Boolean)) return file.write({ outputType:'base64',compression:true })
+  const {default:Zip}=await import('jszip')
+  const pack=await Zip.loadAsync(await file.write({ outputType:'uint8array' }))
+  for (const [index,effect] of effects.entries()) {
+    if (!effect) continue
+    const path='ppt/slides/slide'+(index+1)+'.xml'
+    const xml=await pack.file(path).async('string')
+    // Our pptxgenjs slide ends with a color map override. The transition follows it.
+    if (!xml.includes('</p:clrMapOvr>')) throw new Error('无法定位幻灯片的配色映射。')
+    pack.file(path,xml.replace('</p:clrMapOvr>','</p:clrMapOvr>'+effect))
+  }
+  return pack.generateAsync({type:'base64',compression:'DEFLATE'})
 }
 
 function nodes(root, tag) {
@@ -132,28 +155,59 @@ export async function importPptx(base64) {
       name: nodes(sp, 'cNvPr')[0]?.getAttribute('name') || '',
       text: shapeText(sp),
     }))
-    const boxes = []
+    const boxes = [], geometry = []
+    const ownTitle=/^YanYe (cover|text|columns|image) (?:positioned )?title$/
+    const declaredTitle=objects.find(s=>ownTitle.test(s.name) || ['ctrTitle','title'].includes(s.kind))
+    let positionedTitle
     const shapes = objects.filter(({sp, name, text}) => {
-      const free = name === 'YanYe text box' || (!name.startsWith('YanYe ') && !nodes(sp,'ph').length &&
-        ['1','true'].includes(nodes(sp,'cNvSpPr')[0]?.getAttribute('txBox')))
-      if (!free || sp.parentNode?.localName === 'grpSp') return true
-      const xf = nodes(sp,'xfrm')[0], off = xf && nodes(xf,'off')[0], ext = xf && nodes(xf,'ext')[0]
+      if (sp.parentNode?.localName !== 'spTree' || nodes(sp,'ph').length) return true
+      const propsShape = nodes(sp,'spPr')[0]
+      const kind = propsShape && nodes(propsShape,'prstGeom')[0]?.getAttribute('prst')
+      const own=name.startsWith('YanYe ')
+      const storedTitle=ownTitle.test(name) && name.includes(' positioned ')
+      const explicitTextBox=['1','true'].includes(nodes(sp,'cNvSpPr')[0]?.getAttribute('txBox'))
+      // Some producers encode ordinary text as a transparent, unlined rectangle with no txBox flag.
+      const line=propsShape && nodes(propsShape,'ln')[0]
+      const plainText=!own && !explicitTextBox && kind==='rect' && !!text.trim() && !nodes(sp,'style').length &&
+        [...propsShape.children].some(el=>el.localName==='noFill') && (!line || (!line.hasAttribute('w') && !nodes(line,'solidFill').length))
+      const free=name==='YanYe text box' || (!own && explicitTextBox) || plainText
+      const geometric=name==='YanYe shape' || (!own && !free && Object.hasOwn(shapeKinds,kind))
+      if (!storedTitle && !free && !geometric) return true
+      const xf = propsShape && nodes(propsShape,'xfrm')[0], off = xf && nodes(xf,'off')[0], ext = xf && nodes(xf,'ext')[0]
       if (!off || !ext) return true
       const props = nodes(sp,'rPr')[0] || nodes(sp,'defRPr')[0] || nodes(sp,'endParaRPr')[0]
-      boxes.push(textBox({ text, x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
+      const format = { text, x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
         w: Number(ext.getAttribute('cx'))/slideWidth, h: Number(ext.getAttribute('cy'))/slideHeight,
         fontSize: Number(props?.getAttribute('sz')) / 100 || 22,
-        color: (props && nodes(props,'srgbClr')[0]?.getAttribute('val')) || slideThemes[theme].ink }))
+        fontFace:props && nodes(props,'latin')[0]?.getAttribute('typeface'),
+        bold:['1','true'].includes(props?.getAttribute('b')), italic:['1','true'].includes(props?.getAttribute('i')),
+        align:({ctr:'center',r:'right'})[nodes(sp,'pPr')[0]?.getAttribute('algn')] || 'left',
+        color:(props && nodes(props,'srgbClr')[0]?.getAttribute('val')) || slideThemes[theme].ink }
+      if (storedTitle || (plainText && !declaredTitle && !positionedTitle)) {
+        positionedTitle={sp,box:textBox(format)}
+        return true
+      }
+      if (geometric) {
+        const fill=[...propsShape.children].find(el=>el.localName==='solidFill'), line=nodes(propsShape,'ln')[0]
+        geometry.push(slideShape({...format,kind,rotation:Number(xf.getAttribute('rot'))/60000,
+          fill:fill && nodes(fill,'srgbClr')[0]?.getAttribute('val'),stroke:line && nodes(line,'srgbClr')[0]?.getAttribute('val')}))
+      } else boxes.push(textBox(format))
       return false
     })
-    const title = shapes.find(s => /^YanYe (cover|text|columns|image) title$/.test(s.name))
-      || shapes.find(s => ['ctrTitle', 'title'].includes(s.kind)) || shapes.find(s => s.text.trim())
-    const layout = /^YanYe (cover|text|columns|image) title$/.exec(title?.name || '')?.[1] || 'text'
+    const title = declaredTitle || shapes.find(s=>s.sp===positionedTitle?.sp) || shapes.find(s => s.text.trim())
+    const layout = ownTitle.exec(title?.name || '')?.[1] || 'text'
     const rest = shapes.filter(s => s !== title && !['dt', 'ftr', 'sldNum'].includes(s.kind))
     const body = rest.find(s => s.name === 'YanYe ' + layout + ' body')
     const side = rest.find(s => s.name === 'YanYe columns side')
     const item = newSlide({ layout, title: title?.text || '', body: body ? body.text : rest.map(s => s.text).filter(Boolean).join('\n\n'), side: side?.text || '' })
+    if (positionedTitle) {
+      const {id,text,...format}=positionedTitle.box
+      item.titleBox=format
+    }
     if (boxes.length) item.textBoxes = boxes
+    const transition=parseTransition(content)
+    if (transition) item.transition=transition
+    if (geometry.length) item.shapes = geometry
     for (const pic of nodes(content, 'pic')) {
       const id = nodes(pic, 'blip')[0]?.getAttributeNS(ns, 'embed')
       const imagePath = related.get(id)?.path

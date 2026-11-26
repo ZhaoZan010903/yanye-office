@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import JSZip from 'jszip'
-import { moveSlide, newSlide, readDeck, slidesFromDocument, textBox } from '../src/modules/slides-model.js'
+import { moveSlide, newSlide, readDeck, slideShape, slidesFromDocument, textBox } from '../src/modules/slides-model.js'
 import { exportPptx } from '../src/modules/slides-pptx.js'
 
 test('大纲生成保留章节顺序、列表和围栏内的标题文本', () => {
@@ -43,4 +43,18 @@ test('PPTX 导出独立文字对象、两栏正文、主题和演讲者备注', 
   for (const content of ['评审', '方案甲', '方案乙', 'E9F1EE', 'YanYe columns side']) assert.ok(first.includes(content))
   assert.ok((await zip.file('ppt/slides/slide2.xml').async('string')).includes('问题'))
   assert.ok((await zip.file('ppt/notesSlides/notesSlide1.xml').async('string')).includes('补充讨论'))
+})
+
+test('有色形状与格式化文本写入同页，可用原生 PowerPoint 对象继续编辑', async () => {
+  const shape=slideShape({text:'审核',kind:'diamond',rotation:-30,fill:'a2b3c4',stroke:'204966'})
+  const box=textBox({text:'下周交付',fontFace:'Georgia',bold:true,italic:true,align:'right'})
+  assert.equal(shape.rotation,330)
+  const file=await exportPptx({theme:'paper',slides:[newSlide({shapes:[shape],textBoxes:[box]})]},'图形')
+  const zip=await JSZip.loadAsync(file,{base64:true})
+  const xml=await zip.file('ppt/slides/slide1.xml').async('string')
+  const objects=xml.match(/<p:sp>[^]*?<\/p:sp>/g)
+  const diamond=objects.find(s=>s.includes('YanYe shape'))
+  for (const term of ['prst="diamond"','val="A2B3C4"','val="204966"','rot="19800000"','审核']) assert.ok(diamond.includes(term),term)
+  const text=objects.find(s=>s.includes('YanYe text box'))
+  for (const term of ['typeface="Georgia"','b="1"','i="1"','algn="r"','下周交付']) assert.ok(text.includes(term),term)
 })

@@ -270,20 +270,55 @@ export class FileLibrary {
     return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   }
 
-  async copyPdf(id, revision) {
+  async copyPdf(id, revision, edited, purpose) {
     const file = this.knownFile(id)
-    const bytes = await this.readPdf(id, revision)
-    const target = await this.platform.chooseSave(basename(file.path, extname(file.path)) + '-副本.pdf', 'pdf')
+    if (extensionOf(file.path) !== 'pdf') throw new Error('请选择 PDF 文件。')
+    if (edited != null) {
+      if (!(edited instanceof Uint8Array) || edited.byteLength > maxBytes || Buffer.from(edited.subarray(0,5)).toString('ascii') !== '%PDF-') {
+        throw new Error('编辑后的 PDF 无效或超过 32 MiB。')
+      }
+    }
+    const suffix = purpose === 'extract' ? '-选页.pdf' : purpose === 'append' ? '-合并.pdf' : '-副本.pdf'
+    const target = await this.platform.chooseSave(basename(file.path, extname(file.path)) + suffix, 'pdf')
     if (!target) return null
     const path = join(await realpath(dirname(target)), basename(target))
     this.protect(path)
     if (extensionOf(path) !== 'pdf') throw new Error('请保留 .pdf 扩展名。')
+    const original = await this.readPdf(id, revision)
+    const bytes = edited ?? original
     await exclusiveWrite(path, bytes)
-    return this.remember(path, (await stat(path)).mtime.toISOString(), revision)
+    return this.remember(path, (await stat(path)).mtime.toISOString(), edited == null ? revision : digest(bytes))
   }
-  async chooseOpen() {
-    const path = await this.platform.chooseOpen()
-    return path ? this.openPath(await realpath(path)) : null
+  async chooseOpen(extension) {
+    if (extension) validateExtension(extension)
+    const path = await this.platform.chooseOpen(extension)
+    if (!path) return null
+    if (extension && extensionOf(path) !== extension) throw new Error('请选择 .' + extension + ' 文件。')
+    return this.openPath(await realpath(path))
+  }
+
+  async readOfficeSource(id, revision) {
+    const { path } = this.knownFile(id)
+    this.protect(path)
+    if (!['docx','xlsx','pptx'].includes(extensionOf(path))) throw new Error('请选择 Office Open XML 文件。')
+    const { bytes } = await readBytes(path)
+    if (digest(bytes) !== revision) throw new Error('磁盘原件已经变化，请重新打开后再替换。')
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  }
+
+  async saveOfficeCopy(id, revision, edited) {
+    const { path:source } = this.knownFile(id)
+    const ext = extensionOf(source)
+    if (!['docx','xlsx','pptx'].includes(ext) || !(edited instanceof Uint8Array) || edited.length > maxBytes ||
+        edited[0] !== 0x50 || edited[1] !== 0x4b) throw new Error('Office 副本内容或大小无效。')
+    const target = await this.platform.chooseSave(basename(source, extname(source))+'-替换副本.'+ext, ext)
+    if (!target) return null
+    const path = join(await realpath(dirname(target)), basename(target))
+    this.protect(path)
+    if (extensionOf(path) !== ext || same(path,source)) throw new Error('请选择同格式的新文件名以保留原件。')
+    await this.readOfficeSource(id, revision)
+    await exclusiveWrite(path, edited)
+    return this.remember(path,(await stat(path)).mtime.toISOString(),digest(edited))
   }
 
   async create(directory, name, content) {

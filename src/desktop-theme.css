@@ -1,0 +1,43 @@
+.type-docx { --file-ink:#265b99; --file-tint:#eaf2fb; --file-fold:#bfd9f1; }
+.type-xlsx { --file-ink:#22704e; --file-tint:#e6f3eb; --file-fold:#b7dcc4; }
+.type-pptx { --file-ink:#a14d2e; --file-tint:#fbefe8; --file-fold:#edc5b3; }
+.type-pdf { --file-ink:#a13945; --file-tint:#fcECEE; --file-fold:#edbdc4; }
+.type-md { --file-ink:#654f87; --file-tint:#f1edf7; --file-fold:#d7cae6; }
+.type-txt { --file-ink:#3f6876; --file-tint:#eaf2f3; --file-fold:#c0d8db; }
+.file-glyph { flex:none; vertical-align:middle; }
+.files-center { container-type:inline-size; }
+.files-content .files-create { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:24px 0 40px; }
+.files-create .files-create-tile { gap:12px; padding:12px 16px; min-height:68px; }
+.files-create .files-type-icon { flex:0 0 40px; height:40px; background:var(--file-tint); }
+.files-create-tile > span:nth-child(2) { min-width:0; }
+.files-create-tile > svg:last-child { flex:none; }
+.files-create-tile small { display:block; margin-top:3px; font-size:12px; }
+.disk-tab[aria-current=page] { position:relative; }
+.disk-tab[aria-current=page]::after { content:""; position:absolute; pointer-events:none; inset:0 4px auto; height:2px; background:var(--file-ink,var(--color-ink)); }
+:where(.office-page) { --file-ink:var(--color-ink); }
+.office-page .office-heading { padding:8px 16px; min-height:48px; }
+.office-heading > .file-glyph { width:28px; height:28px; }
+.office-heading input { background:transparent; }
+.office-workspace-command { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; min-height:28px; font:inherit; font-size:12px; color:var(--color-ink); border:0; border-radius:4px; background:transparent; white-space:nowrap; }
+.office-workspace-command:hover { background:var(--color-hover-grey); }
+.office-workspace-command:disabled { opacity:.55; }
+.office-page .word-tabs button[aria-pressed=true],.office-page .sheet-tabs button[aria-pressed=true] { color:var(--file-ink); background:var(--file-tint); }
+.office-page .word-tools button[aria-pressed=true],.office-page .sheet-format button[aria-pressed=true] { background:var(--file-tint); color:var(--file-ink); }
+.office-page .word-tools :is(.lucide-image,.lucide-image-plus),.office-page .slides-toolbar .lucide-image-plus { color:#785d92; }
+.office-page .word-tools .lucide-table,.office-page .slides-toolbar .lucide-chart-column { color:#287758; }
+.office-page .word-tools .lucide-link,.office-page .slides-toolbar .lucide-type { color:#316b9d; }
+.office-page .sheet-formula .lucide,.office-page .sheet-formula span { color:#22704e; }
+.office-page .sheet-scroll th.sheet-head-active { background:#e2f0e7; color:#1c6745; }
+.office-page .sheet-scroll td.sheet-selected { outline-color:#39825f; }
+.office-page[data-ribbon-hidden=true] :is(.word-tabs,.word-tools,.word-comments,.word-band-panel,.sheet-toolbar,.sheet-format,.sheet-rule-panel,.slides-toolbar,.slides-panel,.reader-tools) { display:none; }
+.application :is(button,summary,select) { transition:background-color 150ms ease,color 150ms ease; }
+@container (max-width:650px) { .files-content .files-create { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@container (max-width:375px) { .files-content .files-create { grid-template-columns:minmax(0,1fr); } }
+@media (prefers-reduced-motion:reduce) { .application :is(button,summary,select) { transition:none; } }
+@media print { .office-workspace-command { display:none; } }
+.original-source { display:flex; align-items:center; gap:8px; padding:8px 0; overflow-wrap:anywhere; }
+.original-form > p,.original-path { margin:4px 0 12px; overflow-wrap:anywhere; }
+.original-matches { padding:12px; background:var(--color-paper); border-radius:4px; }
+.original-matches ul { list-style:none; margin:4px 0 0; padding:0; max-height:140px; overflow:auto; }
+.original-matches li { display:grid; grid-template-columns:100px 1fr; gap:8px; padding:4px 0; border-bottom:1px solid var(--color-hairline); overflow-wrap:anywhere; }
+.original-matches small { display:block; color:var(--color-ink); font-size:12px; }

@@ -20,6 +20,23 @@
 .word-find input { width:min(145px,35%); }
 .word-scroll { flex:1; min-height:0; overflow:auto; padding:24px; }
 .word-sheet { box-sizing:border-box; background:white; border:1px solid #e9e7e4; margin-inline:auto; }
+.word-band-panel { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; padding:8px 12px; border-bottom:1px solid #e9e7e4; background:white; font-size:13px; }
+.word-band-panel textarea,.word-band-panel select { border:1px solid #e9e7e4; border-radius:4px; padding:4px 6px; font:inherit; }
+.word-band-panel textarea { flex:1 1 200px; min-width:120px; }
+.word-sheet:has(.word-band-preview) { display:flex; flex-direction:column; }
+.word-sheet:has(.word-band-preview) > div:has(.word-prose) { flex:1; }
+.word-band-preview { color:#69675f; font-size:10pt; white-space:pre-wrap; overflow-wrap:anywhere; }
+.word-comments { padding:8px 12px; border-bottom:1px solid #e9e7e4; background:#f7f6f3; max-height:32vh; overflow:auto; }
+.word-comments form,.word-comments li { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.word-comments :is(input,textarea) { border:1px solid #e9e7e4; background:white; border-radius:4px; padding:4px 8px; font:inherit; }
+.word-comments input { width:90px; }.word-comments textarea { flex:1; min-width:145px; }
+.word-comments ul { padding:0; margin:8px 0 0; list-style:none; }
+.word-comments li { padding:5px 0; border-top:1px solid #e9e7e4; font-size:13px; }
+.word-comments li span { flex:1; min-width:120px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.word-comments li q { max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.word-sheet .word-comment-anchor { border-bottom:2px solid #bfa465; }
+.word-header { border-bottom:1px solid #e9e7e4; margin-bottom:10pt; }
+.word-footer { border-top:1px solid #e9e7e4; margin-top:10pt; }
 .word-prose { font:11pt/1.25 "Microsoft YaHei",Calibri,sans-serif; overflow-wrap:anywhere; color:#37352f; }
 .word-sheet .word-prose { outline:0; min-height:120mm; cursor:text; }
 .word-prose p { margin:0 0 5pt; }

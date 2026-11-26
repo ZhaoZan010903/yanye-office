@@ -1,8 +1,11 @@
-import React, { lazy, Suspense, useEffect, useRef } from 'react'
-import { Check, MoreHorizontal, Star } from 'lucide-react'
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, MoreHorizontal, Replace, Star } from 'lucide-react'
 import { officeKinds, MAX_TITLE_LENGTH } from '../shared/workspace.mjs'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
 import './office.css'
+
+const OriginalReplaceDialog = lazy(() => import('./original-replace-dialog.jsx'))
+const formats = {word:'docx', spreadsheet:'xlsx', presentation:'pptx', pdf:'pdf', txt:'txt'}
 
 const editors = {
   word: lazy(() => import('./modules/Word.jsx')),
@@ -44,15 +47,35 @@ class OfficeContentBoundary extends React.Component {
 
 export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit, onMenu, onFavorite }) {
   const titleRef = useRef(null)
+  const format = formats[page.kind]
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ribbon-collapsed-'+format) === 'true')
+  useEffect(() => {
+    if (!format) return
+    localStorage.setItem('ribbon-collapsed-'+format, String(collapsed))
+    function toggle(event) {
+      if (event.ctrlKey && event.key === 'F1' && !document.querySelector('dialog[open]')) {
+        event.preventDefault()
+        setCollapsed(value => !value)
+      }
+    }
+    window.addEventListener('keydown',toggle)
+    return () => window.removeEventListener('keydown',toggle)
+  },[format, collapsed])
   useEffect(() => {
     if (focusTitle) { titleRef.current?.focus(); titleRef.current?.select() }
   }, [focusTitle])
   const Editor = editors[page.kind]
-  return <section className="office-page" aria-label={officeKinds[page.kind]}>
+  return <section className={'office-page type-'+(format || page.kind)} data-ribbon-hidden={collapsed} aria-label={officeKinds[page.kind]}>
     <header className="office-heading">
       <PageIcon page={page} size={24} />
       <input ref={titleRef} aria-label="页面标题" maxLength={MAX_TITLE_LENGTH} value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
         placeholder="未命名页面" onChange={e => onEdit({ title: e.target.value })} />
+      {['docx','xlsx','pptx'].includes(page.disk?.extension) && <button type="button" className="office-workspace-command" disabled={page.disk.dirty}
+        title={page.disk.dirty ? '当前有未写入的修改。可在文件中心对磁盘原件操作。' : '在磁盘原件中查找并替换，保存独立副本'}
+        onClick={() => setReplaceOpen(true)}><Replace size={15}/>保留版式替换</button>}
+      {format && <IconButton icon={collapsed ? ChevronDown : ChevronUp} label={collapsed?'展开工具栏':'折叠工具栏'}
+        aria-expanded={!collapsed} title={(collapsed?'展开':'折叠')+'工具栏（Ctrl+F1）'} onClick={()=>setCollapsed(!collapsed)}/>}
       <IconButton icon={Star} label={page.favorite ? '取消收藏' : '收藏页面'} onClick={onFavorite} aria-pressed={page.favorite} />
       <IconButton icon={MoreHorizontal} label="页面操作" onClick={onMenu} />
     </header>
@@ -65,6 +88,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
       </Suspense>
       </OfficeContentBoundary>
     </div>
+    {replaceOpen && <Suspense fallback={null}><OriginalReplaceDialog disk={page.disk} onClose={()=>setReplaceOpen(false)}/></Suspense>}
     <footer className="status-bar">
       {saveState.state === 'error'
         ? <button type="button" className="save-error" onClick={onSave} title={saveState.message}>保存失败，点击重试</button>

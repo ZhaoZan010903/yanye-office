@@ -112,7 +112,8 @@ try {
   await close()
   page = await start()
   const data = await page.evaluate(async () => (await window.yanye.load()).workspace)
-  assert.equal(data.pages.find(page => page.id === data.activeId).markdown, lastEdit)
+  // The textarea presents LF while edits retain the imported file's CRLF convention.
+  assert.equal(data.pages.find(page => page.id === data.activeId).markdown, lastEdit.replaceAll('\n','\r\n'))
   assert.equal(await title().inputValue(), '导入样本')
   await body().getByRole('heading', { name: '关闭前的编辑' }).waitFor()
   await exerciseOffice(page, application, temp)

@@ -21,6 +21,23 @@ function errorText(error) {
   return message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
 }
 
+function OfficeFileDetails({ disk }) {
+  const [features,setFeatures] = useState([])
+  useEffect(() => {
+    if (!disk) return
+    let active=true
+    async function load() {
+      const { inspectOriginal } = await import('./modules/office-original.js')
+      const source = await desktop.library.readOfficeSource(disk.id,disk.revision)
+      const found = await inspectOriginal(source,disk.extension)
+      if (active) setFeatures(found)
+    }
+    load().catch(()=>{})
+    return () => { active=false }
+  },[disk?.id,disk?.revision])
+  return features.length ? <p>原文件含有{features.join('、')}，可另存后在原应用中核对。</p> : null
+}
+
 export function App() {
   const [workspace, setWorkspace] = useState(null)
   const [directory, setDirectory] = useState('')
@@ -276,7 +293,7 @@ export function App() {
         <div className="window-drag-spacer" />
       </header>
       {diskTabs.length > 0 && <nav className="disk-tabs" aria-label="打开的文件">{diskTabs.map(p =>
-        <div className="disk-tab" key={p.id} aria-current={p.id===page?.id && screen==='editor' ? 'page' : undefined}>
+        <div className={'disk-tab type-'+p.disk.extension} key={p.id} aria-current={p.id===page?.id && screen==='editor' ? 'page' : undefined}>
           <button onClick={() => open(p.id)} title={p.disk.name}><PageIcon page={p} size={14}/><span>{p.disk.name}</span>{p.disk.dirty && <i className="disk-tab-dot" title="文件有未写入的修改"/>}</button>
           <button className="close-tab" aria-label={'关闭标签 '+p.disk.name} onClick={() => closeTab(p.id)}><X size={12}/></button>
         </div>)}</nav>}
@@ -300,6 +317,7 @@ export function App() {
         <button className="button primary" onClick={async()=>{const id=modal.id;closeModal();try { if (await files.saveFile(id)) closeTab(id,true) } catch(e) { handleFileError(e) }}}>保存文件</button></div>
     </Dialog>}
     {modal?.type === 'confirm-write' && <Dialog title="保存到原 Office 文件" onClose={closeModal}>
+      <OfficeFileDetails disk={byId.get(modal.id)?.disk}/>
       <p>砚页会按支持的格式重新生成文件。修订、宏、复杂图形或特殊版式可能发生变化。覆盖前会在本地用户目录的 file-backups 中备份上一次的文件。</p>
       <div className="files-dialog-actions"><button className="button" onClick={closeModal}>取消</button>
         <button className="button" onClick={() => {closeModal();files.saveFile(modal.id,true).catch(handleFileError)}}>另存副本</button>

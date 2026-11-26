@@ -46,6 +46,12 @@
 .sheet-info details p { position: absolute; bottom: 18px; right: 0; width: min(290px,50vw); padding: 10px 12px; background: #fff; border: 1px solid #e9e7e4; border-radius: 4px; box-shadow: 0 8px 24px #0f0f0f1f; z-index: 6; }
 .sheet-chart { flex: 0 1 auto; max-height: 170px; overflow: auto; padding: 8px 16px; border-bottom: 1px solid #e9e7e4; font-size: 12px; }
 .sheet-chart p { margin: 4px 0; color: #787774; }
+.sheet-chart-head,.sheet-legend,.sheet-legend>span { display:flex;align-items:center;flex-wrap:wrap;gap:8px; }
+.sheet-chart-head { margin-bottom:8px;gap:16px; }
+.sheet-legend i { width:9px;height:9px;border-radius:2px; }
+.sheet-chart-group { display:grid;grid-template-columns:minmax(55px,105px) minmax(55px,360px) minmax(50px,auto);align-items:center;gap:8px;padding:2px 0; }
+.sheet-signed-bar { height:12px;position:relative; }
+.sheet-signed-bar :is(i,span) { display:block;position:absolute;top:2px;height:8px; }
 .sheet-bar-row { display: grid; grid-template-columns: 100px minmax(30px, 360px) 86px; align-items: center; gap: 8px; }
 .sheet-bar-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-bar-row i { display: block; height: 8px; background: #788d93; }
@@ -67,4 +73,9 @@
 .sheet-scroll tbody :is(td,th) { height:var(--sheet-row-height,30px); }
 .sheet-scroll tbody th, .sheet-scroll td span { line-height:calc(var(--sheet-row-height,30px) - 1px); max-height:calc(var(--sheet-row-height,30px) - 1px); overflow:hidden; }
 .sheet-scroll td span { line-height:1.35; }
+.sheet-rule-panel { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; background:var(--paper,#f7f6f3); border-bottom:1px solid #e9e7e4; }
+.sheet-rule-panel :is(input,select), .sheet-filter select, .sheet-formula select, .sheet-scroll td select { padding:3px 5px; font:inherit; color:inherit; border:1px solid #e9e7e4; border-radius:4px; background:white; }
+.sheet-rule-panel input[type=number] { width:80px; }
+.sheet-rule-panel input[type=color] { padding:1px; width:32px; height:24px; vertical-align:middle; }
+.sheet-scroll td select { width:100%; }
 .sheet-scroll td.sheet-highlight:not(.sheet-selected)::after { content:''; position:absolute; inset:0; background:rgba(49,118,138,.11); pointer-events:none; }

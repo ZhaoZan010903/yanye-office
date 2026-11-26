@@ -4,11 +4,16 @@ import {
   Inbox, Library, MoreHorizontal, NotebookPen, Plus, Search, Star, Trash2, X, Sheet, Database, Workflow, Presentation,
 } from 'lucide-react'
 import { ancestors, pageTitle } from '../shared/workspace.mjs'
+import { FileGlyph } from './file-glyph.jsx'
+
+const formatForKind = {word:'docx', spreadsheet:'xlsx', presentation:'pptx', pdf:'pdf', txt:'txt'}
 
 const pageIcons = { desk: NotebookPen, journal: FileText, book: BookOpen, inbox: Inbox, collection: Library, note: File,
   word: FileText, spreadsheet: Sheet, database: Database, canvas: Workflow, presentation: Presentation }
 
 export function PageIcon({ page, size = 16 }) {
+  const extension = page?.disk?.extension || formatForKind[page?.kind]
+  if (extension) return <FileGlyph extension={extension} size={size}/>
   const Icon = pageIcons[page?.kind] ?? File
   return <Icon size={size} aria-hidden="true" />
 }

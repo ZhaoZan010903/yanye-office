@@ -6,6 +6,9 @@ import {
 } from './spreadsheet.js'
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
 import FontPicker from './FontPicker.jsx'
+import SheetRules from './SheetRules.jsx'
+import {chartData,newChart,palettes} from './sheet-chart.js'
+import {conditionalFill,conditionRules,filterRow,listChoices,validationAt} from './spreadsheet.js'
 import './spreadsheet.css'
 
 const rowHeight = 30
@@ -34,17 +37,24 @@ function rowAt(offsets,y) {
   return Math.min(low,offsets.length-2)
 }
 
-function SheetChart({ sheet, display, rows, col }) {
-  const series = rows.filter(r => r !== 0).map(row => ({
-    label: display(sheet,address(row,0)) || String(row+1), value: display(sheet,address(row,col)),
-  })).filter(item => typeof item.value === 'number').slice(0,20)
-  const max = Math.max(1,...series.map(item => Math.abs(item.value)))
+function SheetChart({sheet,display,apply}) {
+  const data=useMemo(()=>chartData(sheet,display),[sheet,display])
+  const values=data.series.flatMap(s=>s.values.filter(v=>v!==null))
+  const min=Math.min(0,...values),max=Math.max(0,...values),span=max-min||1,zero=-min/span*100
   return <section className="sheet-chart" aria-label="柱状图">
-    <strong>{columnName(col)} 列柱状图</strong>
-    {!series.length ? <p>选择有数字的列。第一列用作标签，第一行用作表头。</p> :
-      <div>{series.map(({label,value},i) => <div className="sheet-bar-row" key={i}>
-        <span title={String(label)}>{label}</span><i style={{ width: Math.abs(value)/max*100+'%' }} /><b>{value}</b>
-      </div>)}</div>}
+    <div className="sheet-chart-head"><strong>分组条形图</strong>
+      <label>配色 <select aria-label="图表配色" value={sheet.chart.palette??'ink'} onChange={e=>apply({...sheet,chart:{...sheet.chart,palette:e.target.value,colors:null}})}>
+        {Object.entries(palettes).map(([key,[title]])=><option key={key} value={key}>{title}</option>)}</select></label>
+      <span className="sheet-legend">{data.series.map(s=><span key={s.col}><i style={{background:s.color}}/>{s.title}</span>)}</span>
+    </div>
+    {!values.length?<p>拖选含表头、分类与数值列的区域，再插入图表。</p>:
+      data.rows.map((r,i)=>!filterRow(sheet,r,display)?null:<div className="sheet-chart-group" key={r}>
+        <span>{data.labels[i]||r+1}</span>
+        <div>{data.series.map(s=>s.values[i]===null?null:<div key={s.col} className="sheet-signed-bar" title={s.title+' '+s.values[i]}>
+          <span style={{borderLeft:'1px solid #bbb',left:zero+'%'}}/>
+          <i style={{left:Math.min(zero,zero+s.values[i]/span*100)+'%',width:Math.abs(s.values[i])/span*100+'%',background:s.color}}/>
+        </div>)}</div><span>{data.series.map(s=>s.values[i]??'—').join(' / ')}</span>
+      </div>)}
   </section>
 }
 
@@ -77,6 +87,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const [height, setHeight] = useState(450)
   const [showFunctions, setShowFunctions] = useState(false)
   const [widthEditor, setWidthEditor] = useState(false)
+  const [ruleMode,setRuleMode]=useState('')
   const history = useRef({past:[],future:[]})
   const drag = useRef(false)
   const clipboard = useRef(null)
@@ -87,12 +98,18 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const range = bounds({row,col},{row:endRow,col:endCol})
   const style = sheet.styles?.[selected] ?? {}
   const raw = sheet.cells[selected] ?? ''
+  const choices=listChoices(validationAt(sheet,row,col))
+  const compiledRules=useMemo(()=>conditionRules(sheet),[sheet.conditions])
+  const nativeFilter=sheet.autoFilter
+  const filterOffset=nativeFilter ? col-nativeFilter.box.left : -1
+  const filterColumn=nativeFilter && filterOffset>=0 && col<=nativeFilter.box.right
   const display = useMemo(() => evaluator(book),[book])
   const sort = sheet.sort
   const filter = sheet.query ?? ''
   const verticalMerges = sheet.merges?.some(m => m.bottom > m.top)
   const allRows = useMemo(() => {
     let rows = Array.from({ length: sheet.rows-1 }, (_,i) => i+1)
+    if (Object.keys(sheet.autoFilter?.columns??{}).length) rows=rows.filter(r=>filterRow(sheet,r,display))
     if (filter.trim()) {
       const needle = filter.toLocaleLowerCase().trim()
       rows = rows.filter(r => {
@@ -211,7 +228,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }
   function startEditing(text) {
     original.current = raw; setEditing(true)
-    if (text !== undefined) put(text)
+    if (text !== undefined && !choices) put(text)
   }
   function gridKeys(event) {
     if (event.nativeEvent.isComposing || event.altKey) return
@@ -322,9 +339,14 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:true}})}>按 {columnName(col)} 列降序</button>
         <button disabled={!sort} onClick={()=>updateSheet({...sheet,sort:null})}>还原行序</button>
         <button disabled={verticalMerges} onClick={()=>setFilterOpen(true)}>筛选行</button>
+        <button disabled={verticalMerges || (!nativeFilter && range.top===range.bottom)} onClick={()=>updateSheet({...sheet,autoFilter:nativeFilter?null:{box:range,columns:{}}})}>{nativeFilter?'关闭范围自动筛选':'对选区启用自动筛选'}</button>
         {verticalMerges && <small>先拆分跨行合并的单元格再筛选或排序。</small>}
       </SheetMenu>
-      <button className="sheet-action" aria-pressed={!!sheet.chart} onClick={()=>updateSheet({...sheet,chart:sheet.chart?null:{col}})}><BarChart3 size={15}/>柱状图</button>
+      <SheetMenu label="数据规则">
+        <button onClick={()=>setRuleMode('list')}>下拉列表验证</button>
+        <button onClick={()=>setRuleMode('condition')}>数值条件格式</button>
+      </SheetMenu>
+      <button className="sheet-action" title="选择含表头的分类列与一个或多个数值列" aria-pressed={!!sheet.chart} onClick={()=>tryAction(()=>updateSheet({...sheet,chart:sheet.chart?null:newChart(range)}))}><BarChart3 size={15}/>柱状图</button>
       <button className="sheet-action" aria-expanded={showFunctions} onClick={()=>setShowFunctions(!showFunctions)}><Sigma size={15}/>函数</button>
       <SheetMenu label="导入" icon={FileUp}><button disabled={busy} onClick={()=>exchange('csv',true)}>导入 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',true)}>导入 XLSX</button></SheetMenu>
       <SheetMenu label="导出" icon={FileDown}><button disabled={busy} onClick={()=>exchange('csv',false)}>导出 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',false)}>导出 XLSX</button></SheetMenu>
@@ -382,16 +404,31 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       })}>在选区下方插入求和</button>
       <strong>在公式栏输入函数</strong>
       <code>=IF(B2&gt;=60,"通过","复核")</code><code>=COUNTIF(B2:B12,"&gt;=60")</code><code>=SUMIF(A2:A12,"差旅",B2:B12)</code>
-      <span>支持 SUM、AVERAGE、COUNT、COUNTA、MIN、MAX、ROUND、ABS。条件支持数值比较及文本匹配。</span>
+      <code>=SUMIFS(C2:C12,A2:A12,"差旅",B2:B12,"已批")</code><code>=IFERROR(VLOOKUP(A2,价目!A2:C20,3,FALSE),"未找到")</code>
+      <span>支持 COUNTIFS、多条件求和、通配符和跨表查找。VLOOKUP 精确查找用 FALSE；近似查找须按首列升序。每个引用区域最多 50,000 格，整列引用和动态数组暂不支持。</span>
     </div>}
     {removing===sheet.id && <div className="sheet-filter" role="alert"><span>删除“{sheet.name}”后，引用此表的公式将显示 #REF!。</span>
       <button onClick={()=>{change(removeSheet(book,sheet.id));setRemoving(null);select({row:0,col:0});setEditing(false)}}>确认删除工作表</button>
       <button onClick={()=>setRemoving(null)}>取消</button>
     </div>}
-    <div className="sheet-formula"><output title="拖选、Shift+单击或 Shift+方向键扩展选区">{rangeName(range)}</output><span aria-hidden="true">ƒx</span><input aria-label="公式栏" placeholder="输入值或 =SUM(A1:A3)" maxLength={LIMITS.text} value={raw}
+    {ruleMode && <SheetRules key={sheet.id+':'+rangeName(range)+':'+ruleMode} mode={ruleMode} sheet={sheet} box={range} apply={updateSheet} close={()=>setRuleMode('')} tryAction={tryAction}/>}
+    {filterColumn && <div className="sheet-filter"><Filter size={14}/><label>{columnName(col)} 列筛选 <select aria-label="列值筛选" value={JSON.stringify(nativeFilter.columns[filterOffset]??null)} onChange={e=>{
+      const columns={...nativeFilter.columns}, values=JSON.parse(e.target.value)
+      if (values===null) delete columns[filterOffset]; else columns[filterOffset]=values
+      updateSheet({...sheet,autoFilter:{...nativeFilter,columns}})
+    }}><option value="null">全部值</option>
+      {nativeFilter.columns[filterOffset]?.length>1 && <option value={JSON.stringify(nativeFilter.columns[filterOffset])}>已选 {nativeFilter.columns[filterOffset].length} 项</option>}
+      {Array.from(new Set([...(nativeFilter.columns[filterOffset]??[]),...Object.keys(sheet.cells).filter(ref=>{
+        const p=location(ref); return p.col===col && p.row>nativeFilter.box.top && p.row<=nativeFilter.box.bottom
+      }).map(ref=>String(display(sheet,ref))), ''])).map(v=><option key={v} value={JSON.stringify([v])}>{v || '（空白）'}</option>)}
+    </select></label><span>{rangeName(nativeFilter.box)}</span></div>}
+    <div className="sheet-formula"><output title="拖选、Shift+单击或 Shift+方向键扩展选区">{rangeName(range)}</output><span aria-hidden="true">ƒx</span>
+      {choices && <select aria-label="单元格下拉列表" value={raw.replace(/^'/,'')} onChange={e=>put(e.target.value)}>
+        <option value="">（空白）</option>{choices.map(choice=><option key={choice} value={choice}>{choice}</option>)}</select>}
+      <input aria-label="公式栏" placeholder="输入值或 =SUM(A1:A3)" maxLength={LIMITS.text} value={raw} readOnly={!!choices && ['1','true'].includes(validationAt(sheet,row,col)?.attrs.showErrorMessage)}
       onChange={e=>put(e.target.value)} onKeyDown={e=>{ if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); vertical(1) } }}/></div>
     {(filterOpen || filter) && <div className="sheet-filter"><Filter size={14}/><input autoFocus aria-label="工作表筛选" placeholder="按内容筛选，保留第一行表头" value={filter} onChange={e=>updateSheet({...sheet,query:e.target.value})}/><button onClick={()=>{updateSheet({...sheet,query:''});setFilterOpen(false)}}>清除筛选</button></div>}
-    {sheet.chart && <SheetChart sheet={sheet} display={display} rows={allRows} col={sheet.chart.col} />}
+    {sheet.chart && <SheetChart sheet={sheet} display={display} apply={updateSheet} />}
     <div ref={scroller} className="sheet-scroll" role="region" aria-label="工作表网格" tabIndex={0}
       onScroll={e=>setScroll(e.currentTarget.scrollTop)} onKeyDown={gridKeys}
       onCopy={e=>{if (!editing) {
@@ -408,7 +445,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
           const saved = clipboard.current
           const internal = saved && e.clipboardData.getData('application/x-yanye-range')===saved.token
           const matrix = internal ? saved.cells : parseDelimited(data,'\t')
-          if ((sort || filter) && matrix.length>1) throw new Error('请还原行序并清除筛选，再粘贴多行。')
+          if ((sort || filter || Object.keys(nativeFilter?.columns??{}).length) && matrix.length>1) throw new Error('请还原行序并清除筛选，再粘贴多行。')
           const paste = internal ? pasteRange : writeRange
           updateSheet(paste(sheet,rangeRows[0],range.left,matrix)); setEditing(false)
         })
@@ -426,14 +463,16 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
               const cellStyle=sheet.styles?.[ref] ?? {}
               const result = display(sheet,ref)
               return <td key={c} data-address={ref} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
-                style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:cellStyle.fill,textAlign:cellStyle.align,
+                style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:conditionalFill(compiledRules,rr,cc,result)??cellStyle.fill,textAlign:cellStyle.align,
                   verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
                   textDecorationStyle:String(cellStyle.underline).startsWith('double') ? 'double' : undefined,...cellBorders(cellStyle.borders)}}
                 className={(active?'sheet-selected ':'')+(highlighted.has(rr) && c>=range.left && c<=range.right ? 'sheet-highlight ' : '')+(typeof result==='number'?'sheet-number':'')}
-                onPointerDown={e=>{if(e.button!==0 || e.target.tagName==='INPUT') return; e.preventDefault(); drag.current=true; go(rr,cc,true,e.shiftKey)}}
+                onPointerDown={e=>{if(e.button!==0 || ['INPUT','SELECT'].includes(e.target.tagName)) return; e.preventDefault(); drag.current=true; go(rr,cc,true,e.shiftKey)}}
                 onPointerEnter={e=>{if(drag.current && e.buttons===1) go(rr,cc,true,true)}}
                 onDoubleClick={()=>{if(!editing) { original.current=sheet.cells[ref]??''; setEditing(true) }}}>
-                {active && editing ? <input ref={editInput} aria-label={'编辑 '+ref} maxLength={LIMITS.text} value={raw} onChange={e=>put(e.target.value)} onBlur={()=>setEditing(false)}/> : <span>{formatted(result,sheet.formats?.[ref])}</span>}
+                {active && editing && choices ? <select ref={editInput} aria-label={'选择 '+ref} value={raw.replace(/^'/,'')} onChange={e=>put(e.target.value)} onBlur={()=>setEditing(false)}>
+                  <option value="">（空白）</option>{choices.map(choice=><option key={choice} value={choice}>{choice}</option>)}</select>
+                : active && editing ? <input ref={editInput} aria-label={'编辑 '+ref} maxLength={LIMITS.text} value={raw} onChange={e=>put(e.target.value)} onBlur={()=>setEditing(false)}/> : <span>{formatted(result,sheet.formats?.[ref])}</span>}
               </td>
             })}
           </tr>{r===0 && frozenHeaderDetached && first>1 && <tr aria-hidden="true"><td colSpan={cols.length+1} style={{height:offsets[first]-heights[0]}}/></tr>}</React.Fragment>)}

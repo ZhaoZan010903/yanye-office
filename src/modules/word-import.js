@@ -1,4 +1,6 @@
-import { defaultLayout, highlights, maxImageBytes, validColor, validFont, wordValue } from './word-model.js'
+import { defaultLayout, highlights, maxImageBytes, papers, validColor, validFont, wordValue } from './word-model.js'
+import { bandTypes, pageTypes, readBand } from './word-bands.js'
+import {readComments} from './word-comments.js'
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -88,6 +90,13 @@ export async function readDocx(base64) {
   if (!body) throw new Error('文件中未发现 Word 文档正文。')
   const relations = await xml('word/_rels/document.xml.rels')
   const targets = new Map(all(relations,'Relationship').map(r=>[r.getAttribute('Id'),r]))
+  const commentsRel=[...targets.values()].find(r=>r.getAttribute('Type')===R+'/comments' && r.getAttribute('TargetMode')!=='External')
+  let comments=new Map()
+  if(commentsRel) {
+    const url=new URL(commentsRel.getAttribute('Target'),'https://local.invalid/word/document.xml')
+    if(url.origin==='https://local.invalid') comments=readComments(await xml(decodeURIComponent(url.pathname.slice(1))),message=>warnings.add(message))
+  }
+  const anchored=new Set()
   const numXml = await xml('word/numbering.xml'), numbers = new Map()
   const abstracts = new Map(all(numXml,'abstractNum').map(n=>[attr(n,'abstractNumId'),n]))
   for (const num of all(numXml,'num')) {
@@ -127,6 +136,8 @@ export async function readDocx(base64) {
   }
 
   async function parseParagraph(p) {
+    const ends=new Set(all(p,'commentRangeEnd').map(el=>attr(el,'id')))
+    const activeComments=new Set()
     const pr=child(p,'pPr'), style=val(child(pr,'pStyle')) || ''
     const level=headings.get(style) || Number(/^Heading([1-6])$/i.exec(style)?.[1])
     const align=val(child(pr,'jc')), spacing=child(pr,'spacing')
@@ -153,11 +164,20 @@ export async function readDocx(base64) {
       if (depth>48) throw new Error('文档元素嵌套过深。')
       for (const part of el.children) {
         const name=part.localName
+        if(name==='commentRangeStart' || name==='commentRangeEnd') {
+          const id=attr(part,'id')
+          if(name==='commentRangeEnd') activeComments.delete(id)
+          else if(ends.has(id) && comments.has(id)) activeComments.add(id)
+          continue
+        }
         if (name==='pPr' || name==='rPr') continue
         if (name==='r') { await walk(part,[...marks,...inlineMarks(child(part,'rPr'))],depth+1); continue }
         if (name==='t' || name==='tab' || name==='noBreakHyphen') {
           const text=name==='t'?part.textContent:name==='tab'?'\t':'‑'
-          if (text) inline.push({type:'text',text,...(marks.length?{marks}: {})})
+          if (text) {
+            const annotated=[...marks,...[...activeComments].map(id=>{anchored.add(id);return {type:'wordComment',attrs:comments.get(id)}})]
+            inline.push({type:'text',text,...(annotated.length?{marks:annotated}: {})})
+          }
         } else if (name==='br' || name==='cr') {
           if (attr(part,'type')==='page') pageBreak()
           else inline.push({type:'hardBreak'})
@@ -213,12 +233,33 @@ export async function readDocx(base64) {
   if (size) {
     const width=Number(attr(size,'w')), height=Number(attr(size,'h')), short=Math.min(width,height), long=Math.max(width,height)
     layout.landscape=attr(size,'orient')==='landscape' || width>height
-    layout.paper=Math.abs(short-12240) + Math.abs(long-15840) < Math.abs(short-11906) + Math.abs(long-16838) ? 'Letter':'A4'
-    if (Math.min(Math.abs(short-12240)+Math.abs(long-15840), Math.abs(short-11906)+Math.abs(long-16838))>80) warnings.add('自定义纸张已套用接近的纸型')
+    const mm=[short,long].map(n=>n*25.4/1440)
+    const match=Object.entries(papers).find(([,dims])=>dims.every((v,i)=>Math.abs(v-mm[i])<0.35))
+    if (match) layout.paper=match[0]
+    else if (mm.every(n=>n>=25 && n<=560)) {layout.paper='custom';layout.size=mm}
+    else warnings.add('纸张尺寸超出可编辑范围')
   }
   for(const side of ['top','bottom','left','right']) if (attr(margins,side)!=null) layout[side]=Number(attr(margins,side))*25.4/1440
   if (sections.length>1) warnings.add('多节页面设置已统一')
-  if (Object.keys(zip.files).some(p=>/word\/(?:headers?|footers?|comments|footnotes|endnotes|charts|embeddings|vbaProject)/i.test(p))) warnings.add('页眉页脚、批注、注释或嵌入部件未参与转换')
+  if (flag(child(section,'titlePg'))) layout.differentFirst=true
+  if (flag(child(await xml('word/settings.xml'),'evenAndOddHeaders'))) layout.differentEven=true
+  for (const kind of Object.keys(bandTypes)) {
+    const distance=attr(margins,kind)
+    if (distance!=null) layout[kind+'Distance']=Number(distance)*25.4/1440
+    for (const ref of all(section,kind+'Reference')) {
+      const type=attr(ref,'type'), relation=targets.get(ref.getAttributeNS(R,'id'))
+      if (!Object.hasOwn(pageTypes,type) || !relation || relation.getAttribute('TargetMode')==='External') continue
+      const path=new URL(relation.getAttribute('Target'),'https://local.invalid/word/document.xml')
+      const root=path.origin==='https://local.invalid' && await xml(decodeURIComponent(path.pathname.slice(1)))
+      if (!root) {warnings.add('部分页眉页脚缺少引用部件');continue}
+      const band=readBand(root,message=>warnings.add(message))
+      if (band.text) ((layout.bands??={})[type]??={})[kind]=band
+    }
+  }
+  if (Object.keys(zip.files).some(p=>/word\/(?:footnotes|endnotes|charts|embeddings|vbaProject)/i.test(p))) warnings.add('脚注、尾注或嵌入部件未参与转换')
+  const extended=await xml('word/commentsExtended.xml')
+  if(extended && all(extended,'commentEx').some(el=>[...el.attributes].some(a=>a.localName==='paraIdParent' || (a.localName==='done' && ['true','1'].includes(a.value))))) warnings.add('批注回复与解决状态需要保留原版式文件')
   const content=await blocks(body)
+  if(comments.size!==anchored.size || all(body,'commentReference').some(el=>!anchored.has(attr(el,'id')))) warnings.add('跨段、点状或对象批注请使用保留原版式打开')
   return wordValue({layout,doc:{type:'doc',content:content.length?content:[paragraph()]},compatibility:[...warnings]})
 }

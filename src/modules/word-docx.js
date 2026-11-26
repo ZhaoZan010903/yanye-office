@@ -1,4 +1,6 @@
 import { highlights, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import { bandTypes, pageBand, pageTypes, writeBand } from './word-bands.js'
+import {commentWriter} from './word-comments.js'
 export { readDocx } from './word-import.js'
 
 const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -57,6 +59,7 @@ export async function writeDocx(value) {
   const { doc, layout } = wordValue(value)
   const entries = [['rStyles','styles','styles.xml'],['rNumbers','numbering','numbering.xml']]
   const lists = []
+  const comments=commentWriter(escape)
   let imageCount = 0
   function inline(n) {
     if (n.type === 'hardBreak') return '<w:r><w:br/></w:r>'
@@ -94,7 +97,7 @@ export async function writeDocx(value) {
     else if (Number.isFinite(a.firstLinePt)) indent.push('w:' + (a.firstLinePt < 0 ? 'hanging' : 'firstLine') + '="' + Math.round(Math.abs(a.firstLinePt)*20) + '"')
     if (indent.length) props += '<w:ind ' + indent.join(' ') + '/>'
     if (a.align) props += tag('jc',a.align === 'justify' ? 'both' : a.align)
-    return '<w:p><w:pPr>' + props + '</w:pPr>' + children(n).map(inline).join('') + '</w:p>'
+    return '<w:p><w:pPr>' + props + '</w:pPr>' + comments.paragraph(children(n),inline) + '</w:p>'
   }
   function table(n) {
     const borders = ['top','left','bottom','right','insideH','insideV'].map(k=>'<w:' + k + ' w:val="single" w:sz="4" w:color="B4B3AE"/>').join('')
@@ -138,11 +141,34 @@ export async function writeDocx(value) {
   }
   const body = children(doc).map(n=>block(n)).join('')
   const [width,height] = paperDimensions(layout)
-  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + body + '<w:sectPr><w:pgSz w:w="' + twips(width) + '" w:h="' + twips(height) + '"' + (layout.landscape ? ' w:orient="landscape"' : '') + '/><w:pgMar ' + ['top','right','bottom','left'].map(side=>'w:' + side + '="' + twips(layout[side]) + '"').join(' ') + ' w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>')
+  const parts = [['document','document.main'],['styles','styles'],['numbering','numbering']]
+  if(comments.notes.length) {
+    parts.push(['comments','comments'])
+    entries.push(['rComments','comments','comments.xml'])
+    zip.file('word/comments.xml',xml+comments.body())
+  }
+  let references = ''
+  for (const kind of Object.keys(bandTypes)) {
+    for (const [index,type] of Object.keys(pageTypes).entries()) {
+      const band = pageBand(layout,type,kind)
+      if (!band.text) continue
+      const name = kind+(index+1), id = 'r'+name
+      zip.file('word/'+name+'.xml', xml+writeBand(band,kind,escape))
+      parts.push([name,kind])
+      entries.push([id,kind,name+'.xml'])
+      references += '<w:'+kind+'Reference w:type="'+type+'" r:id="'+id+'"/>'
+    }
+  }
+  if (layout.differentEven) {
+    parts.push(['settings','settings'])
+    entries.push(['rSettings','settings','settings.xml'])
+    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'"><w:evenAndOddHeaders/></w:settings>')
+  }
+  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + body + '<w:sectPr>'+references+'<w:pgSz w:w="' + twips(width) + '" w:h="' + twips(height) + '"' + (layout.landscape ? ' w:orient="landscape"' : '') + '/><w:pgMar ' + ['top','right','bottom','left'].map(side=>'w:' + side + '="' + twips(layout[side]) + '"').join(' ') + ' w:header="'+twips(layout.headerDistance??12.7)+'" w:footer="'+twips(layout.footerDistance??12.7)+'" w:gutter="0"/>'+(layout.differentFirst ? '<w:titlePg/>' : '')+'</w:sectPr></w:body></w:document>')
   zip.file('word/styles.xml',styles())
   zip.file('word/numbering.xml',numbering(lists))
   zip.file('word/_rels/document.xml.rels',relationships(entries))
   zip.file('_rels/.rels',relationships([['rDoc','officeDocument','word/document.xml']]))
-  zip.file('[Content_Types].xml',xml + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>' + [['document','document.main'],['styles','styles'],['numbering','numbering']].map(([p,t])=>'<Override PartName="/word/' + p + '.xml" ContentType="' + mime + t + '+xml"/>').join('') + '</Types>')
+  zip.file('[Content_Types].xml',xml + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>' + parts.map(([p,t])=>'<Override PartName="/word/' + p + '.xml" ContentType="' + mime + t + '+xml"/>').join('') + '</Types>')
   return zip.generateAsync({type:'base64',compression:'DEFLATE'})
 }

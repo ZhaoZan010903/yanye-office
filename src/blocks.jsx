@@ -3,7 +3,7 @@ import { Extension } from '@tiptap/core'
 import { PluginKey } from '@tiptap/pm/state'
 import { ReactRenderer } from '@tiptap/react'
 import Suggestion, { exitSuggestion } from '@tiptap/suggestion'
-import { AlignLeft, CodeXml, FilePlus2, Heading1, Heading2, List, ListOrdered, ListTodo, Minus, Quote, Table2 } from 'lucide-react'
+import { AlignLeft, CodeXml, FilePlus2, GitBranch, Heading1, Heading2, List, ListOrdered, ListTodo, Minus, Quote, Sigma, Table2 } from 'lucide-react'
 
 export const blocks = [
   { id: 'text', title: '正文', icon: AlignLeft, keywords: 'text paragraph', apply: chain => chain.setParagraph() },
@@ -14,6 +14,10 @@ export const blocks = [
   { id: 'todo', title: '待办清单', icon: ListTodo, keywords: 'todo task check checkbox', apply: chain => chain.toggleTaskList() },
   { id: 'quote', title: '引用', icon: Quote, keywords: 'quote blockquote', apply: chain => chain.toggleBlockquote() },
   { id: 'code', title: '代码块', icon: CodeXml, keywords: 'code pre', apply: chain => chain.toggleCodeBlock() },
+  { id: 'formula', title: '公式块', icon: Sigma, keywords: 'math latex formula', apply: chain => chain.insertContent({
+    type:'codeBlock',attrs:{language:'math'},content:[{type:'text',text:'a^2 + b^2 = c^2'}] }) },
+  { id: 'diagram', title: 'Mermaid 流程图', icon: GitBranch, keywords: 'mermaid diagram flowchart', apply: chain => chain.insertContent({
+    type:'codeBlock',attrs:{language:'mermaid'},content:[{type:'text',text:'flowchart LR\n  A[开始] --> B[完成]'}] }) },
   { id: 'table', title: '表格', icon: Table2, keywords: 'table grid', apply: chain => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }) },
   { id: 'divider', title: '分隔线', icon: Minus, keywords: 'divider horizontal rule', apply: chain => chain.setHorizontalRule() },
   { id: 'page', title: '新建子页面', icon: FilePlus2, keywords: 'page child subpage', apply: null },

@@ -1,3 +1,5 @@
+import {conditionalAggregate,ifError,vlookup} from './sheet-lookup.js'
+
 export const LIMITS = { rows: 5000, cols: 128, sheets: 32, text: 32767 }
 
 export function columnName(column) {
@@ -32,6 +34,88 @@ export const findMerge = (sheet,row,col) => sheet.merges?.find(box => inRect(box
 export const rangeName = box => {
   const first = address(box.top,box.left), last = address(box.bottom,box.right)
   return first === last ? first : first + ':' + last
+}
+
+export function parseRange(ref) {
+  if (typeof ref !== 'string') return null
+  const [first,last=first,...extra]=ref.split(':')
+  const a=location(first), b=location(last)
+  return !extra.length && a && b && a.row<1048576 && b.row<1048576 && a.col<16384 && b.col<16384 ? bounds(a,b) : null
+}
+
+export function validationAt(sheet,row,col) {
+  return sheet.validations?.find(rule=>inRect(rule.box,row,col))
+}
+
+export function outsideRange(box,cut) {
+  if (!intersects(box,cut)) return [box]
+  const top=Math.max(box.top,cut.top), bottom=Math.min(box.bottom,cut.bottom)
+  return [
+    {...box,bottom:top-1}, {...box,top:bottom+1},
+    {...box,top,bottom,right:cut.left-1},{...box,top,bottom,left:cut.right+1},
+  ].filter(b=>b.top<=b.bottom && b.left<=b.right)
+}
+
+export function replaceValidation(sheet,box,replacement) {
+  const validations=(sheet.validations??[]).flatMap(rule=>outsideRange(rule.box,box).map(b=>({...rule,box:b})))
+  if(replacement) validations.push(replacement)
+  return {...sheet,validations}
+}
+
+export function clearConditions(sheet,box) {
+  const conditions=(sheet.conditions??[]).flatMap(group=>{
+    const ref=group.ref.split(/\s+/).map(parseRange).filter(Boolean).flatMap(b=>outsideRange(b,box)).map(rangeName).join(' ')
+    return ref?[{...group,ref}]:[]
+  })
+  return {...sheet,conditions}
+}
+
+export function listChoices(rule) {
+  const formula=rule?.formulae?.[0]
+  return rule?.attrs?.type==='list' && typeof formula==='string' && /^"[^"]*"$/.test(formula)
+    ? formula.slice(1,-1).split(',') : null
+}
+
+export function makeList(box,text) {
+  const choices=[...new Set(text.split(/[,，\n]/).map(value=>value.trim()).filter(Boolean))]
+  const formula='"'+choices.join(',')+'"'
+  if (!choices.length || formula.length>257 || choices.some(value=>value.includes('"'))) throw new Error('请填写以逗号分隔的选项，合计最多 255 字符，不含双引号。')
+  return {box,attrs:{type:'list',allowBlank:'1',showErrorMessage:'1',errorStyle:'stop',error:'请选择列表中的值。'},formulae:[formula]}
+}
+
+export const comparisons={
+  greaterThan:['大于',(a,b)=>a>b], lessThan:['小于',(a,b)=>a<b],
+  equal:['等于',(a,b)=>a===b], notEqual:['不等于',(a,b)=>a!==b],
+  greaterThanOrEqual:['大于或等于',(a,b)=>a>=b], lessThanOrEqual:['小于或等于',(a,b)=>a<=b],
+  between:['介于',(a,b,c)=>a>=b && a<=c], notBetween:['不介于',(a,b,c)=>a<b || a>c],
+}
+
+export function conditionRules(sheet) {
+  return (sheet.conditions??[]).flatMap(group=>group.rules.filter(rule=>rule.type==='cellIs' && Object.hasOwn(comparisons,rule.operator)).map(rule=>({
+    boxes:group.ref.split(/\s+/).map(parseRange).filter(Boolean),rule,
+  }))).sort((a,b)=>(a.rule.priority??Infinity)-(b.rule.priority??Infinity))
+}
+
+export function conditionalFill(rules,row,col,value) {
+  if (typeof value!=='number' || !Number.isFinite(value)) return
+  for (const {boxes,rule} of rules) {
+    if (!boxes.some(box=>inRect(box,row,col)) || !rule.formulae?.length || !rule.formulae.every(f=>isNumberText(String(f)))) continue
+    const matched=comparisons[rule.operator][1](value,...rule.formulae.map(Number))
+    if (matched) {
+      const fill=rule.style?.fill, color=fill?.bgColor?.argb ?? fill?.fgColor?.argb
+      if (/^(?:[A-F\d]{2})?[A-F\d]{6}$/i.test(color??'')) return '#'+color.slice(-6)
+      if (rule.stopIfTrue) return
+    }
+  }
+}
+
+export function filterRow(sheet,row,display) {
+  const filter=sheet.autoFilter
+  if (!filter || row<=filter.box.top || row>filter.box.bottom) return true
+  return Object.entries(filter.columns??{}).every(([offset,values])=>{
+    const value=String(display(sheet,address(row,filter.box.left+Number(offset))))
+    return values.some(item=>String(item).toLocaleLowerCase()===value.toLocaleLowerCase())
+  })
 }
 
 export function mergeRange(sheet, box) {
@@ -248,15 +332,31 @@ export function shiftGrid(book, id, axis, index, delta) {
         if (next) shifted[field][next] = format
       }
     }
-    if (sheet.merges) {
-      const start = axis === 'row' ? 'top' : 'left', end = axis === 'row' ? 'bottom' : 'right'
-      shifted.merges = sheet.merges.flatMap(box => {
-        const next = { ...box }
-        if (delta === -1 && box[start] === index && box[end] === index) return []
-        if (box[start] > index || (delta === 1 && box[start] === index)) next[start] += delta
-        if (box[end] >= index) next[end] += delta
-        return next.top === next.bottom && next.left === next.right ? [] : [next]
-      })
+    function shiftBox(box) {
+      const start=axis==='row'?'top':'left', end=axis==='row'?'bottom':'right'
+      if (delta===-1 && box[start]===index && box[end]===index) return null
+      const next={...box}
+      if (box[start]>index || (delta===1 && box[start]===index)) next[start]+=delta
+      if (box[end]>=index) next[end]=Math.min(axis==='row'?1048575:16383,box[end]+delta)
+      return next
+    }
+    if (sheet.merges) shifted.merges=sheet.merges.map(shiftBox).filter(box=>box && (box.top!==box.bottom || box.left!==box.right))
+    if (sheet.validations) shifted.validations=sheet.validations.flatMap(rule=>{
+      const box=shiftBox(rule.box)
+      return box?[{...rule,box}]:[]
+    })
+    if (sheet.conditions) shifted.conditions=sheet.conditions.flatMap(group=>{
+      const ref=group.ref.split(/\s+/).map(parseRange).filter(Boolean).map(shiftBox).filter(Boolean).map(rangeName).join(' ')
+      return ref?[{...group,ref}]:[]
+    })
+    if (sheet.autoFilter) {
+      const old=sheet.autoFilter, box=shiftBox(old.box), columns={}
+      if (box) for (const [offset,values] of Object.entries(old.columns??{})) {
+        const absolute=old.box.left+Number(offset)
+        if (axis==='col' && delta===-1 && absolute===index) continue
+        columns[absolute+(axis==='col' && absolute>=index?delta:0)-box.left]=values
+      }
+      shifted.autoFilter=box?{box,columns}:null
     }
     if (axis === 'row' && sheet.heights) {
       shifted.heights = {}
@@ -281,6 +381,26 @@ export function shiftGrid(book, id, axis, index, delta) {
         shifted[name] = delta === -1 && config.col === index ? null : {...config,col:config.col+delta}
       }
     }
+    if (sheet.chart?.series) {
+      const chart={...sheet.chart}
+      if(axis==='col') {
+        const series=[], colors=[]
+        for(const [i,c] of chart.series.entries()) {
+          if(delta===-1 && c===index) continue
+          series.push(c>=index?c+delta:c)
+          if(chart.colors) colors.push(chart.colors[i])
+        }
+        chart.series=series; chart.col=series[0]
+        if(chart.colors) chart.colors=colors
+        const removedLabel=delta===-1 && chart.labelCol===index
+        if(chart.labelCol>=index) chart.labelCol+=delta
+        shifted.chart=removedLabel || !series.length ? null : chart
+      } else if(chart.start!=null && chart.end!=null) {
+        const box=shiftBox({top:chart.start,bottom:chart.end,left:0,right:0})
+        if(box) {chart.start=box.top;chart.end=box.bottom; if(chart.header>=index) chart.header=Math.max(0,chart.header+delta)}
+        shifted.chart=box?chart:null
+      }
+    }
     return shifted
   })
   return { ...book, sheets }
@@ -299,8 +419,10 @@ function tokenize(formula) {
     const name = /^[a-z_][a-z\d_.]*/i.exec(tail)
     const literal = /^"(?:[^"]|"")*"/.exec(tail)
     const comparison = /^(?:<>|<=|>=|[<>=])/.exec(tail)
+    const error=/^#(?:N\/A|VALUE!|REF!|DIV\/0!|NAME\?|NUM!|NULL!)/i.exec(tail)
     let token
-    if (ref) token = { type: 'ref', sheet: sheetOf(ref[1], ref[2]), ref: ref[3], text: ref[0] }
+    if (error) token={type:'error',text:error[0]}
+    else if (ref) token = { type: 'ref', sheet: sheetOf(ref[1], ref[2]), ref: ref[3], text: ref[0] }
     else if (number) token = { type: 'number', text: number[0] }
     else if (name) token = { type: 'name', text: name[0] }
     else if (literal) token = { type: 'string', text: literal[0] }
@@ -379,20 +501,28 @@ function calculate(formula, current, getSheet, read) {
     const token = tokens[index++]
     if (!token) fail('#VALUE!')
     if (token.type === 'number') return () => Number(token.text)
+    if (token.type === 'error') return ()=>fail(token.text.toUpperCase())
     if (token.type === 'string') return () => token.text.slice(1,-1).replaceAll('""','"')
     if (token.type === '(') { const value = expression(); need(')'); return value }
     if (token.type === 'ref') {
-      if (!eat(':')) return () => read(target(token),token.ref)
-      const end = tokens[index++]
-      if (end?.type !== 'ref' || end.sheet) fail('#REF!')
-      const box = bounds(location(token.ref), location(end.ref))
-      return () => {
+      const range=!!eat(':')
+      const end=range?tokens[index++]:token
+      if(end?.type!=='ref' || (range && end.sheet)) fail('#REF!')
+      const box=bounds(location(token.ref),location(end.ref))
+      const area=()=>{
         if (box.bottom >= LIMITS.rows || box.right >= LIMITS.cols) fail('#REF!')
         if ((box.bottom-box.top+1)*(box.right-box.left+1) > 50000) fail('#LIMIT!')
-        const values = [], sheet = target(token)
-        for (let r=box.top; r<=box.bottom; r++) for (let c=box.left; c<=box.right; c++) values.push(read(sheet,address(r,c)))
+        const sheet=target(token)
+        return {rows:box.bottom-box.top+1,cols:box.right-box.left+1,at:(r,c)=>read(sheet,address(box.top+r,box.left+c))}
+      }
+      const result=()=>{
+        if(!range) return read(target(token),token.ref)
+        const data=area(),values=[]
+        for(let r=0;r<data.rows;r++) for(let c=0;c<data.cols;c++) values.push(data.at(r,c))
         return values
       }
+      result.area=area
+      return result
     }
     if (token.type !== 'name') fail('#VALUE!')
     const name = token.text.toUpperCase()
@@ -405,6 +535,9 @@ function calculate(formula, current, getSheet, read) {
     }
     const valid = (min,max=min) => { if (args.length < min || args.length > max) fail('#VALUE!') }
     return () => {
+      if(name==='IFERROR') return ifError(args)
+      if(name==='VLOOKUP') return vlookup(args,numberOf,compare,criterionMatches)
+      if(name==='SUMIFS' || name==='COUNTIFS') return conditionalAggregate(name,args,criterionMatches)
       if (name === 'IF') {
         valid(2,3)
         return truth(args[0]()) ? scalar(args[1]()) : args[2] ? scalar(args[2]()) : false
@@ -548,6 +681,11 @@ export function writeRange(sheet, row, col, data) {
   data.forEach((line,r) => line.forEach((value,c) => {
     if (value.length > LIMITS.text) throw new Error('单元格最多 32767 个字符。')
     const addr = address(row+r,col+c)
+    const validation=validationAt(sheet,row+r,col+c), choices=listChoices(validation)
+    if (value && choices && ['1','true'].includes(validation.attrs.showErrorMessage) && (validation.attrs.errorStyle??'stop')==='stop'
+        && !choices.some(choice=>choice.toLocaleLowerCase()===value.replace(/^'/,'').toLocaleLowerCase())) {
+      throw new Error(addr+' 的值须从下拉列表中选择。')
+    }
     const merge = findMerge(sheet,row+r,col+c)
     if (merge && (row+r !== merge.top || col+c !== merge.left) && value) throw new Error('粘贴区域包含已合并单元格，请先取消合并。')
     if (value) cells[addr] = value

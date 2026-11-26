@@ -187,6 +187,7 @@ async function run(i) {
     await openFromHub(legacy)
     await b('按此编码打开').click()
     await editor.getByText('中文',{exact:true}).waitFor()
+    await label('保存编码').selectOption('utf8')
     await setDialog(utfCopy)
     await b('另存为').click()
     await b('转换后的副本.txt').first().waitFor()

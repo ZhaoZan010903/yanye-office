@@ -122,9 +122,9 @@ function registerHandlers() {
         defaultPath: root || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] })
       return result.canceled ? null : result.filePaths[0]
     },
-    async chooseOpen() {
+    async chooseOpen(extension) {
       const result = await dialog.showOpenDialog(window, { title: '打开办公文件', properties: ['openFile'],
-        filters: [{ name: '办公文档', extensions: officeExtensions }] })
+        filters: [{ name: extension ? extension.toUpperCase() : '办公文档', extensions: extension ? [extension] : officeExtensions }] })
       return result.canceled ? null : result.filePaths[0]
     },
     async chooseSave(name, extension) {
@@ -134,7 +134,7 @@ function registerHandlers() {
     },
     trash: path => shell.trashItem(path),
   })
-  for (const method of ['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup','readPdf','copyPdf']) {
+  for (const method of ['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup','readPdf','copyPdf','readOfficeSource','saveOfficeCopy']) {
     handle('library:' + method, (...args) => library.invoke(method, ...args))
   }
   handle('workspace:load', async () => ({ workspace: await store.load(), directory: userData }))

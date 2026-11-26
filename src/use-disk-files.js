@@ -29,6 +29,13 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     } }))
   }
 
+  function offerUtf8Copy(reason) {
+    return new Promise(resolve=>setEncodingRequest({kind:'save-copy', reason, finish(accept) {
+      setEncodingRequest(null)
+      resolve(accept)
+    }}))
+  }
+
   async function run(work) {
     if (lock.current) return false
     lock.current = true
@@ -100,13 +107,29 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     const page = latest.current?.pages.find(p => p.id === id)
     if (!page) return Promise.resolve(false)
     if (page.kind === 'pdf') {
-      if (!asNew || !page.disk) { notify('PDF 阅读器保留原件。'); return Promise.resolve(true) }
+      const edits = page.content?.pdfPages
+      if (!page.disk) { notify('请从文件中心重新选择 PDF 原件。'); return Promise.resolve(false) }
+      if (!asNew && !edits) {
+        if (page.disk.dirty) change(current=>updatePage(current,id,{disk:{...page.disk,dirty:false}}))
+        notify('PDF 原件已保存。')
+        return Promise.resolve(true)
+      }
       return run(async () => {
-        const copy = await api.copyPdf(page.disk.id, page.disk.revision)
+        let edited
+        if (edits) {
+          const {editedPdfBytes} = await import('./modules/pdf-edits.js')
+          edited = await editedPdfBytes(await api.readPdf(page.disk.id, page.disk.revision), edits)
+        }
+        const copy = await api.copyPdf(page.disk.id, page.disk.revision, edited)
         if (!copy) return false
-        change(current => updatePage(releaseOtherBindings(current,id,copy.id), id, {
-          disk:binding(copy), title:fileTitle(copy.name,'pdf').slice(0,MAX_TITLE_LENGTH),
-        }))
+        change(current => {
+          // An edit arriving during PDF generation still refers to the original page numbers.
+          const now = current.pages.find(p => p.id === id)
+          if (!now || now.content !== page.content || now.disk?.id !== page.disk.id || now.disk.revision !== page.disk.revision) return current
+          return updatePage(releaseOtherBindings(current,id,copy.id), id, {
+            content:{}, disk:binding(copy), title:fileTitle(copy.name,'pdf').slice(0,MAX_TITLE_LENGTH),
+          })
+        })
         setEpoch(n => n + 1)
         notify('已保存 ' + copy.name)
         return true
@@ -119,11 +142,23 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     return run(async () => {
       if (page.disk && !page.disk.dirty && !asNew) { notify('当前文件已保存。'); return true }
       const extension = pageExtension(page)
-      const convertText = extension === 'txt' && page.content?.encoding === 'gb18030'
-      const content = await writeOfficeFile(page)
+      let convertText = false, content
+      const alternateMapping = extension==='txt' && page.content?.noncanonicalEncoding &&
+        page.content.noncanonicalEncoding===page.content.encoding
+      try {
+        if (alternateMapping && !asNew) {
+          throw Object.assign(new Error('原件含同字异码的历史字节序列。重新编码会改变原字节。'),{code:'TEXT_UNENCODABLE'})
+        }
+        content=await writeOfficeFile(page)
+      } catch (error) {
+        if (extension!=='txt' || error.code!=='TEXT_UNENCODABLE') throw error
+        if (!await offerUtf8Copy(error.message)) return false
+        convertText=true
+        content=await writeOfficeFile({...page, content:{...page.content,encoding:'utf-8',bom:false}})
+      }
       const name = (page.title.trim() || fileTypes[extension].initialName) + (convertText ? '-UTF8' : '') + '.' + extension
       const file = await api.save({ id: page.disk?.id, revision: page.disk?.revision, asNew:asNew || convertText,
-        preserveSource:convertText, name, extension, content })
+        preserveSource:Boolean(convertText || alternateMapping), name, extension, content })
       if (!file) return false
       if (!page.disk) {
         setEpoch(n => n + 1)
@@ -134,8 +169,15 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
         const now = current.pages.find(p => p.id === id)
         if (!now) return current
         const dirty = now.content !== page.content || now.markdown !== page.markdown
-        return updatePage(releaseOtherBindings(current,id,file.id), id, { disk: { ...binding(file), dirty },
-          ...(convertText ? { content:{ ...now.content, encoding:'utf-8', bom:false } } : {}),
+        const fields={}
+        if (extension==='txt' && (convertText || page.content?.noncanonicalEncoding)) {
+          fields.content={...now.content}
+          delete fields.content.noncanonicalEncoding
+          if (convertText && now.content.encoding===page.content.encoding && now.content.bom===page.content.bom) {
+            Object.assign(fields.content,{encoding:'utf-8',bom:false})
+          }
+        }
+        return updatePage(releaseOtherBindings(current,id,file.id), id, { disk: { ...binding(file), dirty }, ...fields,
           title: fileTitle(file.name, extension).slice(0, MAX_TITLE_LENGTH) })
       })
       setEpoch(n => n + 1)

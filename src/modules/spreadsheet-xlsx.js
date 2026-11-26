@@ -1,6 +1,6 @@
-import { bounds, evaluator, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
+import { bounds, evaluator, filterRow, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
 
-export const exchangeNote = 'XLSX 保留值、公式、常用数字格式、字体字号、加粗、斜体、下划线、删除线、RGB 字色和填充、边框、水平与垂直对齐、合并区域、行高列宽及首行首列冻结。日期转为文本。图片、图表、宏与复杂样式超出当前转换范围。CSV 导出当前表的计算结果。'
+export const exchangeNote = 'XLSX 支持值、公式、常用数字格式、字体、边框、对齐、合并、行高列宽、冻结、列表验证、数值条件格式、按值筛选和每表一张引用本表数据的分组柱形或条形图。日期转为文本。其他图表、图片、宏和高级筛选条件可能丢失。CSV 导出当前表的计算结果。'
 const formatByCode = new Map(Object.entries(numberFormats).map(([key,[,code]])=>[code,key]))
 
 export function availableName(proposed, sheets) {
@@ -44,6 +44,7 @@ export function verifyArchive(bytes) {
     if (total > 64*1024*1024) throw new Error('工作簿解压后超过 64 MiB。')
     offset += 46 + view.getUint16(offset+28,true) + view.getUint16(offset+30,true) + view.getUint16(offset+32,true)
   }
+  return { entries, total }
 }
 
 async function excelWorkbook() {
@@ -60,11 +61,18 @@ export async function readXlsx(base64) {
   const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
   verifyArchive(bytes)
   const workbook = await excelWorkbook()
-  await workbook.xlsx.load(bytes, { ignoreNodes: ['drawing','picture','conditionalFormatting','dataValidations'] })
+  await workbook.xlsx.load(bytes, { ignoreNodes: ['drawing','picture','dataValidations'] })
   if (!workbook.worksheets.length || workbook.worksheets.length > LIMITS.sheets) throw new Error('XLSX 须含 1 到 32 张工作表。')
+  const {nativeRules}=await import('./sheet-xml-rules.js')
+  const rules=await nativeRules(bytes)
   return workbook.worksheets.map(ws => {
     if (ws.rowCount > LIMITS.rows || ws.columnCount > LIMITS.cols) throw new Error('单表最多 5000 行、128 列。')
     const sheet = newSheet(ws.name)
+    const native=rules.get(ws.name)
+    if (native?.validations?.length) sheet.validations=native.validations
+    if (native?.autoFilter) sheet.autoFilter=native.autoFilter
+    if (native?.chart) sheet.chart=native.chart
+    if (ws.conditionalFormattings?.length) sheet.conditions=ws.conditionalFormattings
     sheet.rows = Math.max(sheet.rows,ws.rowCount)
     sheet.cols = Math.max(sheet.cols,ws.columnCount)
     const frozen = ws.views?.find(v => v.state === 'frozen')
@@ -137,6 +145,16 @@ export async function writeXlsx(book) {
   const display = evaluator(book)
   for (const sheet of book.sheets) {
     const ws = workbook.addWorksheet(sheet.name)
+    if (sheet.validations?.length) ws.dataValidations.add('A1',{type:'any',formulae:[]})
+    for (const group of sheet.conditions??[]) ws.addConditionalFormatting(structuredClone(group))
+    if (sheet.autoFilter) {
+      ws.autoFilter=rangeName(sheet.autoFilter.box)
+      if (Object.keys(sheet.autoFilter.columns??{}).length) {
+        for(let row=sheet.autoFilter.box.top+1;row<Math.min(sheet.rows,sheet.autoFilter.box.bottom+1);row++) {
+          if(!filterRow(sheet,row,display)) ws.getRow(row+1).hidden=true
+        }
+      }
+    }
     for (const [index,height] of Object.entries(sheet.heights ?? {})) ws.getRow(Number(index)+1).height=height
     for (const [index,width] of Object.entries(sheet.widths ?? {})) ws.getColumn(Number(index)+1).width=width
     if (sheet.freezeColumn || sheet.freezeHeader) ws.views = [{state:'frozen', xSplit:sheet.freezeColumn ? 1 : 0, ySplit:sheet.freezeHeader ? 1 : 0}]
@@ -168,7 +186,8 @@ export async function writeXlsx(book) {
       if (style.borders) cell.border = style.borders
     }
   }
-  const bytes = new Uint8Array(await workbook.xlsx.writeBuffer())
+  const {writeNativeRules}=await import('./sheet-xml-rules.js')
+  const bytes=await writeNativeRules(new Uint8Array(await workbook.xlsx.writeBuffer()),book.sheets,display)
   const parts = []
   for (let i=0; i<bytes.length; i+=16384) parts.push(String.fromCharCode(...bytes.subarray(i,i+16384)))
   return btoa(parts.join(''))

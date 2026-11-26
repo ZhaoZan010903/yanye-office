@@ -1,6 +1,7 @@
 const endings = { n: '\n', w: '\r\n', r: '\r' }
 const marks = { 'utf-8': [239,187,191], 'utf-16le': [255,254], 'utf-16be': [254,255] }
-export const encodingNames = { 'utf-8':'UTF-8', 'utf-16le':'UTF-16 LE', 'utf-16be':'UTF-16 BE', gb18030:'GB18030 / GBK' }
+export const encodingNames = { 'utf-8':'UTF-8', 'utf-16le':'UTF-16 LE', 'utf-16be':'UTF-16 BE', gb18030:'GB18030', gbk:'GBK' }
+export const legacyChinese = encoding => encoding === 'gb18030' || encoding === 'gbk'
 export const eolNames = { n:'LF', w:'CRLF', r:'CR' }
 export const blankText = { text:'', encoding:'utf-8', bom:false, eol:'w' }
 
@@ -9,7 +10,7 @@ export function base64Bytes(value) {
   return Uint8Array.from(atob(value), c => c.charCodeAt(0))
 }
 
-function base64(bytes) {
+export function base64(bytes) {
   if (bytes.toBase64) return bytes.toBase64()
   let result = ''
   for (let i = 0; i < bytes.length; i += 16_384) result += String.fromCharCode(...bytes.subarray(i, i + 16_384))
@@ -48,12 +49,17 @@ export function textModel(decoded, encoding, bom) {
   return { text, encoding, bom, eol:types[0] || 'w', ...(types.length > 1 ? { lineMap:codes.join('') } : {}) }
 }
 
+export function restoreLineEndings(value) {
+  let line = 0
+  return value.text.replace(/\n/g, () => endings[value.lineMap?.[line++] || value.eol])
+}
+
 export function encodeText(input) {
   const value = { ...blankText, ...input }
-  let line = 0
-  const raw = value.text.replace(/\n/g, () => endings[value.lineMap?.[line++] || value.eol])
-  // Legacy Chinese encodings can be read locally. Their edited copy is saved in UTF-8.
-  const encoding = value.encoding === 'gb18030' ? 'utf-8' : value.encoding
+  const raw = restoreLineEndings(value)
+  const encoding = value.encoding
+  if (!Object.hasOwn(marks, encoding)) throw new Error('请选择支持的 Unicode 保存编码。')
+  if (encoding === 'utf-8' && !raw.isWellFormed()) throw new Error('正文含不成对的 UTF-16 代理项。请修正对应字符，或选择 UTF-16 LE / BE 保存。')
   const mark = value.bom ? marks[encoding] : []
   let bytes
   if (encoding === 'utf-8') {

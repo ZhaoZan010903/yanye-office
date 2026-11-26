@@ -1,11 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronRight, Clock3, File, FileText, Folder, FolderOpen, FolderPlus, MoreHorizontal, Plus, Presentation, RefreshCw, Search, Sheet, X } from 'lucide-react'
 import { fileTypes } from './office-files.js'
 import { Dialog, IconButton } from './workspace-ui.jsx'
+import { FileGlyph } from './file-glyph.jsx'
 import './file-center.css'
 
 const icons = { docx:FileText, xlsx:Sheet, pptx:Presentation, md:FileText, txt:FileText, pdf:File }
 const newFileTypes = Object.entries(fileTypes).filter(([, type]) => !type.openOnly)
+const OriginalReplaceDialog = lazy(() => import('./original-replace-dialog.jsx'))
+const canReplace = row => !row.isDirectory && ['docx','xlsx','pptx'].includes(row.extension)
 const parentOf = path => path.split('/').slice(0, -1).join('/')
 const basename = path => path?.split(/[\\/]/).filter(Boolean).at(-1) || path
 const messageOf = e => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
@@ -102,6 +105,14 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
     setRefresh(n=>n+1)
     await onMutate()
   }
+  async function replaceOriginal(row) {
+    setPending(true)
+    try {
+      const {id,name,extension,revision} = await (section === 'recent' ? api.readRecent(row.id) : api.read(row.path))
+      show({type:'replace', disk:{id,name,extension,revision}})
+    } catch (e) { setModal(null); setMessage(messageOf(e)) }
+    finally { setPending(false) }
+  }
   async function submit(e) {
     e.preventDefault()
     if (pending || files.busy) return
@@ -130,12 +141,12 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
     <div className="files-content">
       <header className="files-intro"><h1>文件中心</h1><button className="button primary" disabled={files.busy}
         onClick={() => files.openFile(() => api.chooseOpen()).catch(e => setMessage(messageOf(e)))}><FolderOpen size={16}/>打开本地文件</button></header>
-      <div className="files-create" aria-label="新建办公文件">{newFileTypes.map(([ext,type]) => {
-        const Icon = icons[ext]
-        return <button key={ext} className={'files-create-tile type-'+ext} aria-label={'新建'+type.label} disabled={files.busy}
-          onClick={() => show({type:'create',ext},type.initialName)}>
-          <span className="files-type-icon"><Icon size={23} strokeWidth={1.5}/></span>
-          <span><strong>{type.label}</strong><small>.{ext}</small></span><Plus size={14}/></button>
+      <div className="files-create" aria-label="本地文件工具">{['docx','xlsx','pptx','pdf','md','txt'].map(ext => {
+        const type=fileTypes[ext]
+        return <button key={ext} className={'files-create-tile type-'+ext} aria-label={type.openOnly?'打开 PDF 文件':'新建'+type.label} disabled={files.busy}
+          onClick={() => type.openOnly ? files.openFile(()=>api.chooseOpen(ext)).catch(e=>setMessage(messageOf(e))) : show({type:'create',ext},type.initialName)}>
+          <span className="files-type-icon"><FileGlyph extension={ext} size={34}/></span>
+          <span><strong>{type.openOnly?'PDF 文档':type.label}</strong><small>{type.openOnly?'打开 .pdf':'.'+ext}</small></span>{type.openOnly?<FolderOpen size={15}/>:<Plus size={15}/>}</button>
       })}</div>
       <div className="files-tabs">
         <button aria-pressed={recent} onClick={() => {setSection('recent');setFilter('');setSort('default')}}><Clock3 size={16}/>最近文件</button>
@@ -151,14 +162,14 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
         <IconButton label="刷新文件列表" icon={RefreshCw} size={15} onClick={() => setRefresh(n=>n+1)}/>
       </div>
       {message && <div className="files-feedback" role="alert">{message}<IconButton label="关闭提示" icon={X} size={14} onClick={() => setMessage('')}/></div>}
-      <table className="files-table"><thead><tr><th>名称</th><th>{recent ? '位置' : '大小'}</th><th>时间</th>{!recent && <th aria-label="文件操作"/>}</tr></thead><tbody>
+      <table className="files-table"><thead><tr><th>名称</th><th>{recent ? '位置' : '大小'}</th><th>时间</th><th aria-label="文件操作"/></tr></thead><tbody>
         {visible.map(row => {
           const Icon = row.isDirectory ? Folder : icons[row.extension] || File
           return <tr key={row.path || row.id}>
-            <td><button className={'files-row type-'+row.extension} onClick={() => openRow(row)} disabled={files.busy} title={row.name}><Icon size={18}/><span>{row.name}</span></button></td>
+            <td><button className={'files-row type-'+row.extension} onClick={() => openRow(row)} disabled={files.busy} title={row.name}>{!row.isDirectory && fileTypes[row.extension] ? <FileGlyph extension={row.extension} size={20}/> : <Icon size={18}/>}<span>{row.name}</span></button></td>
             <td title={recent ? row.path : undefined}>{recent ? row.path : row.isDirectory ? '文件夹' : sizeLabel(row.size)}</td>
             <td>{row.modifiedAt && dateFormat.format(new Date(row.modifiedAt))}</td>
-            {!recent && <td><IconButton icon={MoreHorizontal} size={16} label={row.name+' 的文件操作'} onClick={() => show({type:'actions',row})}/></td>}
+            <td>{(!recent || canReplace(row)) && <IconButton icon={MoreHorizontal} size={16} label={row.name+' 的文件操作'} onClick={() => show({type:'actions',row})}/>}</td>
           </tr>
         })}
       </tbody></table>
@@ -166,13 +177,14 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
     </div>
     {modal?.type === 'choose-type' && <Dialog title="新建办公文件" onClose={() => setModal(null)}>
       <div className="action-list">{newFileTypes.map(([ext,type]) => {
-        const Icon = icons[ext]
-        return <button key={ext} onClick={()=>show({type:'create',ext},type.initialName)}><Icon size={16}/>{type.label}</button>
+        return <button key={ext} onClick={()=>show({type:'create',ext},type.initialName)}><FileGlyph extension={ext} size={20}/>{type.label}</button>
       })}</div></Dialog>}
     {modal?.type === 'actions' && <Dialog title={modal.row.name} onClose={() => setModal(null)}>
-      <div className="action-list"><button onClick={() => show({type:'rename',row:modal.row},modal.row.name)}>重命名</button>
+      <div className="action-list">{canReplace(modal.row) && <button disabled={pending} onClick={()=>replaceOriginal(modal.row)}>保留版式替换</button>}
+        {!recent && <><button onClick={() => show({type:'rename',row:modal.row},modal.row.name)}>重命名</button>
         <button onClick={() => show({type:'move',row:modal.row})}>移动到文件夹</button>
-        <button className="danger-action" onClick={() => show({type:'trash',row:modal.row})}>移到系统回收站</button></div></Dialog>}
+        <button className="danger-action" onClick={() => show({type:'trash',row:modal.row})}>移到系统回收站</button></>}</div></Dialog>}
+    {modal?.type === 'replace' && <Suspense fallback={null}><OriginalReplaceDialog disk={modal.disk} onSaved={()=>setRefresh(n=>n+1)} onClose={()=>setModal(null)}/></Suspense>}
     {modal?.type === 'move' && <MoveDialog api={api} root={root} source={modal.row} onClose={() => setModal(null)}
       submit={async target => { await api.move(modal.row.path,target); await mutated() }}/>}
     {title && <Dialog key={modal.type} title={title} onClose={() => {if (!pending) setModal(null)}}>

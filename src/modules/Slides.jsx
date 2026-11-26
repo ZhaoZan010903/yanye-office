@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
-import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, ImagePlus, Move, PanelTop, Play, Plus, Printer, Trash2, Type, X } from 'lucide-react'
-import { moveSlide, newSlide, readDeck, slideBoxes, slideLayouts, slidesFromDocument, slideThemes, textBox } from './slides-model.js'
+import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, ImagePlus, Move, PanelTop, Play, Plus, Printer, Shapes, Trash2, Type, X } from 'lucide-react'
+import { moveSlide, newSlide, readDeck, shapeKinds, slideBoxes, slideLayouts, slideShape, slidesFromDocument, slideThemes, textBox } from './slides-model.js'
+import { ShapeProperties, SlideShape } from './SlideShapes.jsx'
+import { slideTransition, speedNames, transitionNames } from './slide-transition.js'
 import './slides.css'
 
 function positioned({ x, y, w, h }) {
@@ -12,7 +14,8 @@ function FreeText({ box, index, selected, select, update }) {
   const drag = useRef(null)
   const [preview,setPreview] = useState(null)
   const position = preview || box
-  const style = { ...positioned(position), color:'#' + box.color, fontSize:box.fontSize / 9.6 + 'cqw' }
+  const style = { ...positioned(position), color:'#' + box.color, fontSize:box.fontSize / 9.6 + 'cqw',
+    fontFamily:box.fontFace, fontStyle:box.italic?'italic':undefined, fontWeight:box.bold?700:400, textAlign:box.align }
   if (!update) return <div className="slides-text" style={style}>{box.text}</div>
   function dragPosition(e) {
     const start = drag.current
@@ -36,13 +39,17 @@ function FreeText({ box, index, selected, select, update }) {
   </div>
 }
 
-function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit }) {
+function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit }) {
   const boxes = slideBoxes(slide.layout)
   const fields = { title: '幻灯片标题', body: '幻灯片正文', side: '右栏正文' }
   const placeholders = { title: '输入标题', body: slide.layout === 'cover' ? '添加副标题' : '添加正文', side: '添加右栏正文' }
   return <div className="slides-page" style={{ '--slide-paper': '#' + theme.background, '--slide-ink': '#' + theme.ink }}>
     {Object.entries(boxes).map(([field, box]) => {
-      const style = positioned(box)
+      const style = field==='title' && slide.titleBox ? {
+        ...positioned(slide.titleBox), color:'#'+slide.titleBox.color, fontFamily:slide.titleBox.fontFace,
+        fontSize:slide.titleBox.fontSize/9.6+'cqw',fontWeight:slide.titleBox.bold?700:400,
+        fontStyle:slide.titleBox.italic?'italic':undefined,textAlign:slide.titleBox.align,
+      } : positioned(box)
       if (field === 'side' && slide.layout === 'image') {
         return <div key="image" className="slides-image-box" style={style}>
           {slide.image ? <img src={slide.image.data} alt={slide.image.name || '幻灯片插图'} /> :
@@ -54,6 +61,8 @@ function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit 
         placeholder={placeholders[field]} value={slide[field] || ''} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
         <div key={field} className={className} style={style}>{slide[field]}</div>
     })}
+    {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId}
+      onSelect={edit ? ()=>onShapeSelect(shape.id) : undefined} onMove={edit ? patch=>onShapeEdit(shape.id,patch) : undefined}/>)}
     {(slide.textBoxes || []).map((box,i) => <FreeText key={box.id} box={box} index={i} selected={box.id === boxId}
       select={() => onBoxSelect?.(box.id)} update={edit ? patch => onBoxEdit(box.id,patch) : undefined} />)}
   </div>
@@ -77,6 +86,12 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   const [busy, setBusy] = useState(false)
   const [deleted, setDeleted] = useState(null)
   const [boxId,setBoxId] = useState(null)
+  const [shapeId,setShapeId] = useState(null), [shapeKind,setShapeKind] = useState('rect')
+  const shapes=selected.shapes || [], currentShape=shapes.find(s=>s.id===shapeId)
+  const transition=slideTransition(selected.transition)
+  function setTransition(patch) { changeSlide(selected.id,{transition:slideTransition({...transition,...patch})}) }
+  function selectBox(id) { setBoxId(id);setShapeId(null) }
+  function selectShape(id) { setShapeId(id);setBoxId(null) }
   const freeBoxes = selected.textBoxes || []
   const currentBox = freeBoxes.find(box => box.id === boxId)
   const root = useRef(null)
@@ -114,17 +129,25 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   function editBox(id,patch) {
     changeSlide(selected.id,{textBoxes:freeBoxes.map(box => box.id === id ? textBox({...box,...patch}) : box)})
   }
+  function editShape(id,patch) {
+    changeSlide(selected.id,{shapes:shapes.map(s=>s.id===id ? slideShape({...s,...patch}) : s)})
+  }
+  function insertShape(existing) {
+    const shape = existing ? slideShape({...existing,id:crypto.randomUUID(),x:existing.x+.03,y:existing.y+.03}) :
+      slideShape({kind:shapeKind,x:.32+(shapes.length%5)*.04,y:.32+(shapes.length%5)*.04})
+    if(changeSlide(selected.id,{shapes:[...shapes,shape]})) selectShape(shape.id)
+  }
   function insertBox() {
     const from = freeBoxes.length % 5
     const box = textBox({ x:.12 + from * .04, y:.45 + from * .04, color:theme.ink })
     if (changeSlide(selected.id,{textBoxes:[...freeBoxes,box]})) {
-      setBoxId(box.id)
+      selectBox(box.id)
       requestAnimationFrame(() => root.current?.querySelector('.slides-freetext.selected textarea')?.focus())
     }
   }
   function append(slides, importedTheme) {
     const current = latest.current
-    const blank = current.slides.length === 1 && !current.slides[0].textBoxes?.length && !['title', 'body', 'side', 'notes', 'image'].some(k => current.slides[0][k])
+    const blank = current.slides.length === 1 && !current.slides[0].textBoxes?.length && !current.slides[0].shapes?.length && !['title', 'body', 'side', 'notes', 'image'].some(k => current.slides[0][k])
     const list = blank ? [] : current.slides
     const next = { ...current, slides: [...list, ...slides], theme: blank && importedTheme ? importedTheme : current.theme }
     if (save(next)) { setActiveId(slides[0].id); setPanel(''); setDeleted(null) }
@@ -160,6 +183,11 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
     setPlaying(false)
     if (document.fullscreenElement === root.current) document.exitFullscreen().catch(() => {})
   }
+  useEffect(() => {
+    if (!playing || transition.afterMs==null || index+1>=deck.slides.length) return
+    const timer=setTimeout(()=>setActiveId(deck.slides[index+1].id),transition.afterMs)
+    return ()=>clearTimeout(timer)
+  },[playing,selected.id,transition.afterMs,index,deck.slides])
   useEffect(() => {
     const fullScreenChanged = () => { if (!document.fullscreenElement) setPlaying(false) }
     document.addEventListener('fullscreenchange', fullScreenChanged)
@@ -229,7 +257,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
 
   return <section ref={root} tabIndex={-1} className={'slides-editor' + (playing ? ' is-playing' : '')} aria-label="演示文稿编辑器">
     {playing ? <div className="slides-show">
-      <div className="slides-projector"><SlidePage slide={selected} theme={theme} /></div>
+      <div key={selected.id} className={'slides-projector transition-'+transition.effect} style={{'--fade-time':{fast:'.25s',med:'.6s',slow:'1s'}[transition.speed]}}
+        onClick={()=>{ if (transition.click && index+1<deck.slides.length) setActiveId(deck.slides[index+1].id) }}><SlidePage slide={selected} theme={theme} /></div>
       <div className="slides-show-bar">
         <button type="button" disabled={!index} onClick={() => setActiveId(deck.slides[index - 1].id)}>上一页</button>
         <span aria-live="polite">{index + 1} / {deck.slides.length}</span>
@@ -240,6 +269,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       <div className="slides-toolbar">
         <button type="button" onClick={() => insert(false)}><Plus size={16} />新建幻灯片</button>
         <button type="button" onClick={insertBox}><Type size={15}/>插入文本框</button>
+        <label>形状<select aria-label="形状类型" value={shapeKind} onChange={e=>setShapeKind(e.target.value)}>{Object.entries(shapeKinds).map(([type,label])=><option key={type} value={type}>{label}</option>)}</select></label>
+        <button onClick={()=>insertShape()}><Shapes size={15}/>插入形状</button>
         <label>版式<select aria-label="幻灯片版式" value={selected.layout} onChange={e => changeSlide(selected.id, { layout: e.target.value })}>
           {Object.entries(slideLayouts).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select></label>
@@ -247,11 +278,26 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
           {Object.entries(slideThemes).map(([id, t]) => <option key={id} value={id}>{t.name}</option>)}
         </select></label>
         <button type="button" onClick={() => setPanel(panel === 'outline' ? '' : 'outline')} aria-expanded={panel === 'outline'}><PanelTop size={15} />文档大纲</button>
+        <button type="button" onClick={()=>setPanel(panel==='transition'?'':'transition')} aria-expanded={panel==='transition'}>切换</button>
         <button type="button" onClick={() => setPanel(panel === 'import' ? '' : 'import')} aria-expanded={panel === 'import'}><FileInput size={15} />导入 PPTX</button>
         <button type="button" disabled={busy} onClick={exportFile}><FileDown size={15} />导出 PPTX</button>
         <button type="button" disabled={busy || !onPrintPdf} onClick={printDeck} title="将所有幻灯片导出为 PDF"><Printer size={15} />导出 PDF</button>
         <button type="button" className="slides-play" onClick={show} title="从当前页放映（F5）"><Play size={15} />放映</button>
       </div>
+      {panel==='transition' && <div className="slides-panel" aria-label="当前页切换">
+        <label>效果<select aria-label="切换效果" value={transition.effect} onChange={e=>setTransition({effect:e.target.value})}>{Object.entries(transitionNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+        <label>速度<select aria-label="切换速度" value={transition.speed} disabled={transition.effect!=='fade'} onChange={e=>setTransition({speed:e.target.value})}>{Object.entries(speedNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+        <label><input type="checkbox" checked={transition.click} onChange={e=>setTransition({click:e.target.checked})}/>单击换页</label>
+        <label><input type="checkbox" checked={transition.afterMs!=null} onChange={e=>setTransition({afterMs:e.target.checked?5000:null})}/>定时换页</label>
+        {transition.afterMs!=null && <label>停留秒数<input type="number" aria-label="停留秒数" min="0" max="86400" step=".1" key={selected.id+'-'+transition.afterMs} defaultValue={transition.afterMs/1000}
+          onBlur={e=>{ if(e.target.checkValidity() && Number.isFinite(e.target.valueAsNumber)) setTransition({afterMs:e.target.valueAsNumber*1000}); else e.target.value=transition.afterMs/1000 }}
+          onKeyDown={e=>{if(e.key==='Enter') e.currentTarget.blur()}}/></label>}
+        <button onClick={()=>save({...deck,slides:deck.slides.map(s=>({...s,transition}))})}>应用到全部幻灯片</button>
+        <IconAction icon={X} label="关闭切换设置" onClick={()=>setPanel('')}/>
+      </div>}
+      {currentShape && <ShapeProperties shape={currentShape} shapes={shapes} select={selectShape} edit={patch=>editShape(shapeId,patch)}
+        reorder={direction=>changeSlide(selected.id,{shapes:moveSlide(shapes,shapes.indexOf(currentShape),direction)})}
+        duplicate={()=>insertShape(currentShape)} remove={()=>{if(changeSlide(selected.id,{shapes:shapes.filter(s=>s.id!==shapeId)}))setShapeId(null)}}/>}
       {currentBox && <div className="slides-panel slides-box-properties" aria-label="文本框属性">
         <select aria-label="选中文本框" value={boxId} onChange={e=>setBoxId(e.target.value)}>{freeBoxes.map((b,i)=>
           <option key={b.id} value={b.id}>{i+1}. {b.text.slice(0,14) || '空文本框'}</option>)}</select>
@@ -265,6 +311,11 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
             onKeyDown={e => { if(e.key === 'Enter') e.currentTarget.blur() }} />{isSize ? 'pt' : '%'}</label>
         })}
         <label>字色<input aria-label="文本框字色" type="color" value={'#'+currentBox.color} onChange={e=>editBox(boxId,{color:e.target.value.slice(1)})}/></label>
+        <label>字体<select aria-label="文本框字体" value={currentBox.fontFace || 'Microsoft YaHei'} onChange={e=>editBox(boxId,{fontFace:e.target.value})}>
+          {[...new Set([currentBox.fontFace || 'Microsoft YaHei','Microsoft YaHei','SimSun','KaiTi','Aptos','Arial','Calibri','Georgia','Times New Roman'])].map(f=><option key={f}>{f}</option>)}</select></label>
+        <button aria-pressed={!!currentBox.bold} onClick={()=>editBox(boxId,{bold:!currentBox.bold})}>加粗</button>
+        <button aria-pressed={!!currentBox.italic} onClick={()=>editBox(boxId,{italic:!currentBox.italic})}>斜体</button>
+        <select aria-label="文本框对齐" value={currentBox.align || 'left'} onChange={e=>editBox(boxId,{align:e.target.value})}><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select>
         <button onClick={()=>{if(changeSlide(selected.id,{textBoxes:freeBoxes.filter(b=>b.id!==boxId)})) setBoxId(null)}}>删除文本框</button>
         <IconAction icon={X} label="收起文本框属性" onClick={()=>setBoxId(null)} />
       </div>}
@@ -274,7 +325,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         </select><button type="button" onClick={() => append(slidesFromDocument(pages.find(p => p.id === sourceId) || pages[0]))}>按标题生成并追加</button></> : <span>工作区还没有可用的文档。</span>}
         <IconAction icon={X} label="关闭文档大纲" onClick={() => setPanel('')} />
       </div>}
-      {panel === 'import' && <div className="slides-panel"><span>按原页序追加文字、备注和每页首张 PNG / JPEG，采用本地版式。复杂图形、动画和媒体会略过。</span>
+      {panel === 'import' && <div className="slides-panel"><span>按原页序追加文本、常用形状、备注和每页首张 PNG / JPEG。导入采用本地版式，动画、组合及媒体会简化。</span>
         <button type="button" disabled={busy} onClick={importFile}>选择 PPTX 文件</button><IconAction icon={X} label="关闭导入" onClick={() => setPanel('')} /></div>}
       {error && <p className="slides-error" role="alert">{error}</p>}
       <div className="slides-layout">
@@ -294,7 +345,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         </aside>
         <div className="slides-workarea">
           <div className="slides-canvas"><SlidePage theme={theme} slide={selected} edit={patch => changeSlide(selected.id, patch)}
-            onImage={() => imageInput.current.click()} boxId={boxId} onBoxSelect={setBoxId} onBoxEdit={editBox} /></div>
+            onImage={() => imageInput.current.click()} boxId={boxId} onBoxSelect={selectBox} onBoxEdit={editBox}
+            shapeId={shapeId} onShapeSelect={selectShape} onShapeEdit={editShape} /></div>
           {selected.layout === 'image' && selected.image && <div className="slides-image-tools">
             <button type="button" onClick={() => imageInput.current.click()}>更换插图</button>
             <button type="button" onClick={() => changeSlide(selected.id, { image: null })}>移除插图</button>

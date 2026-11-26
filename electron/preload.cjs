@@ -7,7 +7,7 @@ function listen(channel, handler) {
 }
 
 contextBridge.exposeInMainWorld('yanye', {
-  library: Object.fromEntries(['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup','readPdf','copyPdf']
+  library: Object.fromEntries(['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup','readPdf','copyPdf','readOfficeSource','saveOfficeCopy']
     .map(method => [method, (...args) => ipcRenderer.invoke('library:' + method, ...args)])),
   importFile: extension => ipcRenderer.invoke('office:import', extension),
   printPdf: name => ipcRenderer.invoke('office:print-pdf', name),

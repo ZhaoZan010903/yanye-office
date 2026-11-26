@@ -4,6 +4,35 @@ import JSZip from 'jszip'
 import { writeDocx } from '../src/modules/word-docx.js'
 import { wordValue, findText } from '../src/modules/word-model.js'
 import { Schema } from '@tiptap/pm/model'
+import {bandPrintStyles} from '../src/modules/word-bands.js'
+
+test('正文批注跨字符格式定位，同段重叠批注保存成独立原生锚点',async()=>{
+  const mark=id=>({type:'wordComment',attrs:{id,text:'批注 '+id,author:'审阅人',date:'2026-11-26T10:00:00Z'}})
+  const doc={type:'doc',content:[{type:'paragraph',content:[
+    {type:'text',text:'第一',marks:[mark('a')]},{type:'text',text:'二',marks:[mark('a'),mark('b'),{type:'bold'}]},
+    {type:'text',text:'三',marks:[mark('b')]}]}]}
+  const zip=await JSZip.loadAsync(await writeDocx({doc}),{base64:true})
+  const body=await zip.file('word/document.xml').async('string')
+  assert.match(body,/<w:commentRangeStart w:id="0"\/>.*?第一.*?<w:commentRangeStart w:id="1"\/>.*?二.*?<w:commentRangeEnd w:id="0"\/>.*?三.*?<w:commentRangeEnd w:id="1"\/>/s)
+  assert.match(await zip.file('word/comments.xml').async('string'),/审阅人.*?批注 a.*?批注 b/s)
+})
+
+test('首页、偶数页、页码和总页数域写成 Word 原生关系与打印页边框',async()=>{
+  const layout={paper:'A3',differentFirst:true,differentEven:true,bands:{
+    default:{header:{text:'项目 & 审核',align:'left'},footer:{text:'{{PAGE}} / {{NUMPAGES}}',align:'center'}},
+    first:{header:{text:'封面',align:'right'}},even:{footer:{text:'双页',align:'left'}},
+  }}
+  const zip=await JSZip.loadAsync(await writeDocx({layout}),{base64:true})
+  const document=await zip.file('word/document.xml').async('string')
+  assert.match(document,/<w:titlePg\/>/)
+  assert.match(document,/w:type="first"/)
+  assert.match(document,/w:type="even"/)
+  assert.match(await zip.file('word/settings.xml').async('string'),/w:evenAndOddHeaders/)
+  const footer=await zip.file('word/footer1.xml').async('string')
+  assert.match(footer,/w:instr=" PAGE "/)
+  assert.match(footer,/w:instr=" NUMPAGES "/)
+  assert.match(bandPrintStyles(layout),/counter\(pages\)/)
+})
 
 test('新建 Word 文件包含可读取的 Office 包、正文和页面设置', async () => {
   const book=await JSZip.loadAsync(await writeDocx({}),{base64:true})

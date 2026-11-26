@@ -1,4 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Extension } from '@tiptap/core'
+import { Plugin } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
@@ -8,13 +11,30 @@ import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import {
-  ArrowDownToLine, Bold, Check, ChevronRight, CircleAlert, CodeXml, Columns3, FilePlus2, Heading2, Italic, List,
+  ArrowDownToLine, BookOpen, Bold, Check, ChevronRight, CircleAlert, CodeXml, Columns3, FilePlus2, Italic, List,
   ListTree, LoaderCircle, MoreHorizontal, PanelRightClose, PanelRightOpen, Pilcrow, Plus, Redo2, Star, Undo2, X,
 } from 'lucide-react'
 import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, pageTitle } from '../shared/workspace.mjs'
 import { blocks, BlockChoices, runBlock, slashBlocks } from './blocks.jsx'
 import { describeDocument, describeSource } from './markdown.js'
+import MarkdownFind from './MarkdownFind.jsx'
+import { editSource, editorSource } from './markdown-search.js'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
+import './modules/writing-tools.css'
+
+const MarkdownFigures=lazy(()=>import('./MarkdownFigures.jsx'))
+const MarkdownReading=lazy(()=>import('./MarkdownReading.jsx'))
+const focusBlock = active => Extension.create({
+  name:'writingFocus',
+  addProseMirrorPlugins() {
+    return [new Plugin({props:{decorations(state) {
+      if (!active()) return null
+      const selection=state.selection.$from
+      if (!selection.depth) return null
+      return DecorationSet.create(state.doc,[Decoration.node(selection.before(1),selection.after(1),{class:'md-active-block'})])
+    }}})]
+  },
+})
 
 function SaveState({ state, onSave }) {
   if (state.state === 'error') return <button type="button" className="save-state save-error" title={state.message} onClick={onSave}>
@@ -60,7 +80,7 @@ function ContextPane({ info, selected, changeSelection, childPages, onOpenPage, 
   </aside>
 }
 
-function Toolbar({ editor, format, sourceMode, setMode, sourceOnly, contextOpen, onContextToggle, page, onFavorite, onExport, onMenu, onCreateChild }) {
+function Toolbar({ editor, format, mode, setMode, sourceOnly, contextOpen, onContextToggle, page, onFavorite, onExport, onMenu, onCreateChild, tools }) {
   const [popup, setPopup] = useState('')
   const controls = useRef(null)
 
@@ -76,9 +96,9 @@ function Toolbar({ editor, format, sourceMode, setMode, sourceOnly, contextOpen,
     }
   }, [popup])
 
-  const disabled = sourceMode || !editor
+  const disabled = mode!=='rich' || !editor
   const run = command => () => editor?.chain().focus()[command]().run()
-  const isTable = !sourceMode && format?.table
+  const isTable = !disabled && format?.table
 
   return <div className="editor-toolbar">
     <div className="format-controls" ref={controls} aria-label="编辑工具">
@@ -90,7 +110,9 @@ function Toolbar({ editor, format, sourceMode, setMode, sourceOnly, contextOpen,
       <div className="tool-group mark-tools">
         <IconButton icon={Bold} label="粗体" title="粗体（Ctrl B）" aria-pressed={format?.bold ?? false} disabled={disabled} onClick={run('toggleBold')} />
         <IconButton icon={Italic} label="斜体" title="斜体（Ctrl I）" aria-pressed={format?.italic ?? false} disabled={disabled} onClick={run('toggleItalic')} />
-        <IconButton icon={Heading2} label="二级标题" aria-pressed={format?.heading ?? false} disabled={disabled} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
+        <select aria-label="段落级别" disabled={disabled} value={format?.heading ?? 0}
+          onChange={e=>tools.heading(Number(e.target.value))}><option value={0}>正文</option>
+          {[1,2,3,4,5,6].map(level=><option key={level} value={level}>标题 {level}</option>)}</select>
         <IconButton icon={List} label="无序列表" aria-pressed={format?.list ?? false} disabled={disabled} onClick={run('toggleBulletList')} />
       </div>
       <span className="tool-divider mark-tools" />
@@ -108,15 +130,30 @@ function Toolbar({ editor, format, sourceMode, setMode, sourceOnly, contextOpen,
             <button type="button" key={command} onClick={() => { setPopup(''); run(command)() }}>{label}</button>)}
         </div>}
       </div>}
+      <div className="menu-anchor">
+        <button type="button" className="insert-button" aria-expanded={popup==='writing'} onClick={()=>setPopup(popup==='writing'?'':'writing')}>
+          <BookOpen size={16}/><span>写作工具</span></button>
+        {popup==='writing' && <div className="toolbar-menu md-tools-menu">
+          {[
+            ['查找','Ctrl F',()=>tools.find('find')], ['查找与替换','Ctrl H',()=>tools.find('replace')],
+            ['专注模式','F8',tools.toggleFocus,tools.focus,disabled], ['打字机模式','F9',tools.toggleTypewriter,tools.typewriter,disabled],
+            ['公式与图表预览','',tools.toggleFigures,tools.figures],
+          ].map(([label,key,action,pressed,inactive])=><button key={label} disabled={inactive} aria-pressed={pressed}
+            onClick={()=>{setPopup('');action()}}><span>{label}</span><kbd>{key}</kbd></button>)}
+        </div>}
+      </div>
     </div>
     <div className="toolbar-spacer" />
     <div className="tool-group page-tools" aria-label="页面工具">
       <div className="mode-switch" aria-label="编辑模式">
-        <button type="button" aria-pressed={!sourceMode} disabled={sourceOnly} onClick={() => { setPopup(''); setMode('rich') }}>
+        <button type="button" aria-pressed={mode==='rich'} disabled={sourceOnly} onClick={() => { setPopup(''); setMode('rich') }}>
           <Pilcrow size={15} aria-hidden="true" /><span>富文本</span>
         </button>
-        <button type="button" aria-pressed={sourceMode} onClick={() => { setPopup(''); setMode('source') }}>
+        <button type="button" aria-pressed={mode==='source'} onClick={() => { setPopup(''); setMode('source') }}>
           <CodeXml size={15} aria-hidden="true" /><span>源码</span>
+        </button>
+        <button type="button" aria-pressed={mode==='read'} onClick={() => { setPopup(''); setMode('read') }}>
+          <BookOpen size={15} aria-hidden="true"/><span>阅读</span>
         </button>
       </div>
       <span className="tool-divider page-tools-divider" />
@@ -135,10 +172,14 @@ export function DocumentEditor({
 }) {
   const [initialSource] = useState(() => describeSource(page.markdown))
   const [mode, setMode] = useState(() => initialSource.sourceOnly ? 'source' : 'rich')
-  const sourceInfo = useMemo(() => mode === 'source' ? describeSource(page.markdown) : null, [mode, page.markdown])
+  const sourceInfo = useMemo(() => mode !== 'rich' ? describeSource(page.markdown) : null, [mode, page.markdown])
   const [selectedHeading, setSelectedHeading] = useState(null)
+  const [find,setFind]=useState(null), [figures,setFigures]=useState(false)
+  const [focus,setFocus]=useState(false), [typewriter,setTypewriter]=useState(false)
+  const focusRef=useRef(false), scrollRef=useRef(null), rootRef=useRef(null)
   const titleInput = useRef(null)
   const sourceInput = useRef(null)
+  const editTarget=useRef(null)
   const lastRichText = useRef(initialSource.sourceOnly ? '' : page.markdown)
   const handlers = useRef({ onCreateChild, onExternalLink, onChange })
   handlers.current = { onCreateChild, onExternalLink, onChange }
@@ -152,6 +193,7 @@ export function DocumentEditor({
       Image.configure({ allowBase64: true }),
       Placeholder.configure({ placeholder: '开始写作，或输入 / 插入内容块' }),
       Markdown.configure({ markedOptions: { gfm: true } }),
+      focusBlock(()=>focusRef.current),
       slashBlocks(() => handlers.current.onCreateChild()),
     ],
     content: lastRichText.current,
@@ -167,7 +209,7 @@ export function DocumentEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      const markdown = editor.getMarkdown()
+      const markdown = editSource(lastRichText.current, editor.getMarkdown())
       if (handlers.current.onChange({ markdown })) lastRichText.current = markdown
       else editor.commands.setContent(lastRichText.current, { contentType: 'markdown', emitUpdate: false })
     },
@@ -176,12 +218,65 @@ export function DocumentEditor({
 
   const format = useEditorState({ editor, selector: ({ editor }) => editor ? ({
     undo: editor.can().undo(), redo: editor.can().redo(), bold: editor.isActive('bold'), italic: editor.isActive('italic'),
-    heading: editor.isActive('heading', { level: 2 }), list: editor.isActive('bulletList'), table: editor.isActive('table'),
+    heading: editor.getAttributes('heading').level ?? 0, list: editor.isActive('bulletList'), table: editor.isActive('table'),
   }) : null })
 
   const richDoc = editor?.state.doc
   const info = useMemo(() => sourceInfo || (richDoc ? describeDocument(editor) : initialSource), [richDoc, editor, initialSource, sourceInfo])
   const currentHeading = info.headings.some(heading => heading.position === selectedHeading) ? selectedHeading : info.headings[0]?.position
+  function toggleFocus() {
+    focusRef.current=!focusRef.current
+    setFocus(focusRef.current)
+    if(editor) editor.view.dispatch(editor.state.tr.setMeta('writingView',true))
+  }
+  function heading(level) {
+    const chain=editor?.chain().focus()
+    if (chain) (level ? chain.setHeading({level}) : chain.setParagraph()).run()
+  }
+  function openFind(next) {
+    if (mode==='read') setMode('source')
+    setFind(next)
+    if (find===next) {
+      const query=rootRef.current?.querySelector('.md-find input')
+      query?.focus()
+      query?.select()
+    }
+  }
+  function closeFind() {
+    setFind(null)
+    if (mode==='rich') editor?.commands.focus()
+    else sourceInput.current?.focus()
+  }
+  useEffect(()=>{
+    if (!editor || !typewriter || mode!=='rich') return
+    let frame
+    function center() {
+      cancelAnimationFrame(frame)
+      frame=requestAnimationFrame(()=>{
+        if (!editor.isFocused || !scrollRef.current) return
+        const box=scrollRef.current.getBoundingClientRect()
+        const caret=editor.view.coordsAtPos(editor.state.selection.head)
+        const distance=caret.top+((caret.bottom-caret.top)/2)-box.top-box.height/2
+        if (Math.abs(distance)>3) scrollRef.current.scrollTop+=distance
+      })
+    }
+    editor.on('transaction',center)
+    editor.commands.focus()
+    center()
+    return ()=>{editor.off('transaction',center);cancelAnimationFrame(frame)}
+  },[editor,typewriter,mode])
+  function writingKey(e) {
+    if (e.defaultPrevented || e.nativeEvent.isComposing || e.altKey) return
+    const mod=e.ctrlKey || e.metaKey, key=e.key.toLowerCase()
+    let action
+    if (mod && key==='/') action=()=>switchMode(mode==='source' ? (sourceInfo?.sourceOnly?'read':'rich') : 'source')
+    else if (mod && (key==='f' || key==='h')) action=()=>openFind(key==='h'?'replace':'find')
+    else if (!mod && key==='escape' && find) action=closeFind
+    else if (!mod && key==='f8' && mode==='rich') action=toggleFocus
+    else if (!mod && key==='f9' && mode==='rich') action=()=>setTypewriter(x=>!x)
+    else if (mod && !e.shiftKey && /^[0-6]$/.test(key) && mode==='rich') action=()=>heading(Number(key))
+    if (action) {e.preventDefault();action()}
+  }
 
   // Opening an externally changed Markdown file can reuse this editor instance.
   useEffect(() => {
@@ -209,9 +304,24 @@ export function DocumentEditor({
       editor.commands.setContent(page.markdown, { contentType: 'markdown', emitUpdate: false })
       lastRichText.current = page.markdown
     }
+    if (next==='read') {setFind(null);setFigures(false)}
     setSelectedHeading(null)
     setMode(next)
   }
+
+  function editFigure(item) {
+    editTarget.current=item
+    setMode('source')
+  }
+  useLayoutEffect(()=>{
+    const input=sourceInput.current, item=editTarget.current
+    if (mode!=='source' || !item || !input) return
+    editTarget.current=null
+    input.focus()
+    input.setSelectionRange(item.bodyStart,item.bodyEnd)
+    input.scrollTop=Math.max(0,(item.line-1)*parseFloat(getComputedStyle(input).lineHeight)-input.clientHeight/3)
+    input.scrollIntoView({block:'nearest'})
+  },[mode])
 
   function jumpTo(heading) {
     setSelectedHeading(heading.position)
@@ -221,18 +331,26 @@ export function DocumentEditor({
       input.setSelectionRange(heading.position, heading.position)
       const lineHeight = parseFloat(getComputedStyle(input).lineHeight)
       input.scrollTop = Math.max(0, (heading.line - 2) * lineHeight)
+    } else if (mode==='read') {
+      const headings=rootRef.current.querySelectorAll('.md-reading :is(h1,h2,h3,h4,h5,h6)')
+      headings[info.headings.indexOf(heading)]?.scrollIntoView({block:'start'})
     } else {
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       editor?.view.nodeDOM(heading.position)?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' })
     }
   }
 
-  return <section className="document" aria-label="写作区">
-    <Toolbar editor={editor} format={format} sourceMode={mode === 'source'} setMode={switchMode} sourceOnly={sourceInfo?.sourceOnly}
+  return <section ref={rootRef} className={'document md-workspace'+(focus && mode==='rich'?' md-focus':'')+(typewriter && mode==='rich'?' md-typewriter':'')}
+    aria-label="写作区" onKeyDownCapture={writingKey}>
+    <Toolbar editor={editor} format={format} mode={mode} setMode={switchMode} sourceOnly={sourceInfo?.sourceOnly}
       contextOpen={contextOpen} onContextToggle={onContextToggle} page={page} onFavorite={onFavorite}
-      onExport={onExport} onMenu={onMenu} onCreateChild={onCreateChild} />
+      onExport={onExport} onMenu={onMenu} onCreateChild={onCreateChild}
+      tools={{heading,find:openFind,toggleFocus,focus,toggleTypewriter:()=>setTypewriter(v=>!v),typewriter,toggleFigures:()=>setFigures(v=>!v),figures}} />
+    {find && <MarkdownFind editor={editor} sourceRef={sourceInput} source={mode==='source'?editorSource(page.markdown):null}
+      replacing={find==='replace'} close={closeFind}/>}
+    {figures && <Suspense fallback={<p role="status">正在打开预览…</p>}><MarkdownFigures markdown={page.markdown} close={()=>setFigures(false)}/></Suspense>}
     <div className={`editor-layout ${contextOpen ? 'with-context' : ''}`}>
-      <div className="document-scroll">
+      <div className="document-scroll" ref={scrollRef}>
         <div className="document-sheet">
           <div className={`page-mark page-mark-${page.kind}`}><PageIcon page={page} size={25} /></div>
           <input ref={titleInput} spellCheck={false} className="document-title" aria-label="页面标题" value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
@@ -241,14 +359,18 @@ export function DocumentEditor({
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
               event.preventDefault()
               if (mode === 'source') sourceInput.current?.focus()
+              else if (mode==='read') rootRef.current.querySelector('.md-reading')?.focus()
               else editor?.commands.focus('start')
             }} />
           <div className="document-rule" aria-hidden="true" />
           <div hidden={mode !== 'rich'}><EditorContent editor={editor} /></div>
+          {mode==='read' && <Suspense fallback={<p role="status">正在排版…</p>}>
+            <MarkdownReading markdown={page.markdown} edit={editFigure} onLink={onExternalLink}/>
+          </Suspense>}
           {mode === 'source' && <div className="source-editor">
             {sourceInfo.sourceOnly && <p className="source-note"><CircleAlert size={15} />本文包含扩展语法，使用源码模式编辑可保留其原始格式。</p>}
-            <textarea ref={sourceInput} aria-label="Markdown 源码" value={page.markdown} maxLength={MAX_MARKDOWN_LENGTH}
-              spellCheck={false} placeholder="在这里编写 Markdown…" onChange={event => onChange({ markdown: event.target.value })} />
+            <textarea ref={sourceInput} aria-label="Markdown 源码" value={editorSource(page.markdown)} maxLength={MAX_MARKDOWN_LENGTH}
+              spellCheck={false} placeholder="在这里编写 Markdown…" onChange={event => onChange({ markdown:editSource(page.markdown,event.target.value) })} />
           </div>}
         </div>
       </div>
@@ -258,7 +380,7 @@ export function DocumentEditor({
     <footer className="status-bar">
       <SaveState state={saveState} onSave={onSave} />
       <div className="status-details"><span>{info.characters.toLocaleString('zh-CN')} 字符</span><span className="status-separator" />
-        <span>{mode === 'source' ? 'Markdown 源码' : page.disk ? 'Markdown' : '电子文档 · 仅本机'}</span></div>
+        <span>{mode === 'source' ? 'Markdown 源码' : mode==='read' ? 'Markdown 阅读' : page.disk ? 'Markdown' : '电子文档 · 仅本机'}</span></div>
     </footer>
   </section>
 }

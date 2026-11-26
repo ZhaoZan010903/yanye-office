@@ -25,14 +25,14 @@ test('TXT retains BOM, mixed line endings, blank lines and a missing final newli
   }
 })
 
-test('unknown TXT encoding asks before decode, canceled preview creates no draft, and conversion writes UTF-8', async () => {
+test('unknown TXT encoding asks before decode, canceled preview creates no draft, and save retains GB18030', async () => {
   const bytes=Buffer.from([0xd6,0xd0,0xce,0xc4])
   assert.equal(detectEncoding(bytes),null)
   const file={name:'旧编码.txt',extension:'txt',content:bytes.toString('base64')}
   assert.equal(await readOfficeFile(file,()=>null),null)
   const page = {kind:'txt', ...await readOfficeFile(file,()=> 'gb18030')}
   assert.equal(page.content.text,'中文')
-  assert.equal(Buffer.from(await writeOfficeFile(page),'base64').toString(), '中文')
+  assert.deepEqual(Buffer.from(await writeOfficeFile(page),'base64'), bytes)
 })
 
 test('PDF binding stores no bytes; copy keeps original bytes, rejects a changed original or existing target', async t => {

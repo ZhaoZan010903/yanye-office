@@ -2,7 +2,7 @@
 
 砚页是一款面向 Windows 的开源本地办公软件。名字取自砚台与书页。你可以在同一棵页面树里写 Markdown、算预算、排项目进度、画流程，再把文档大纲整理成演示文稿。
 
-**0.7.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+**0.8.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
 
 ![砚页文件中心的新建入口、最近文件与本地目录](docs/files.png)
 
@@ -89,6 +89,7 @@ pnpm test:desktop
 | 0.5 · 本地格式编辑 | 原版式文字替换、页眉页脚和域、原生图表与规则、形状与放映切换、PDF 页面整理与批注、Markdown 和文本工具 |
 | 0.6 · 本地编辑体验 | Tauri 与 Rust 宿主、两种可编辑 Markdown 视图、语言围栏、上下文菜单与 Office 功能区 |
 | 0.7 · Markdown 与办公格式 | 脚注和引用、流程与时序图、整页源码、Word 分节和文字修订、Excel 透视表与宏原件保留、演示对象动画 |
+| 0.8 · 本地 Office 往返 | 跨段修订与拒绝、多级行分组与列字段、切片器、按段播放与自定义运动路径 |
 | 后续本地里程碑 | 分块按需读入、附件与大库索引、文稿引用、深度排版、专业图形与更多格式互操作 |
 | 最后 · 团队文档协作 | 全部本地里程碑完成后，再开发账号、共享权限、评论、多人同步与冲突处理 |
 

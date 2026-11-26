@@ -22,6 +22,14 @@ try {
     const wrap=xml=>parse('<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'+xml+'</p:sld>')
     const targets=new Map([['2','title']]),shapeIds=new Map([['title','2']])
     const initial=timing.writeTiming({animations:[{target:'title',effect:'fade',duration:400,trigger:'click'}]},shapeIds)
+    const paper={title:'第一段\n第二段',animations:[{target:'title',effect:'fade',duration:400,trigger:'with',delay:150,byParagraph:true}]}
+    const shape='<p:sp><p:nvSpPr><p:cNvPr id="2"/></p:nvSpPr><p:txBody><p:p/><p:p/></p:txBody></p:sp>'
+    const item=timing.readTiming(wrap(shape+timing.writeTiming(paper,shapeIds)),targets)
+    item.title=paper.title+'\n第三段'
+    const rewritten=wrap(timing.writeTiming(item,shapeIds))
+    const build={editable:item.nativeTiming.editable,byParagraph:item.animations[0].byParagraph,
+      triggers:timing.expandedEffects(item).map(e=>[e.trigger,e.delay]),
+      ranges:[...rewritten.getElementsByTagNameNS('*','pRg')].map(n=>n.getAttribute('st'))}
     const samples=[
       initial.replace('<p:bldP ','<p:bldP build="p" bldLvl="1" '),
       initial.replace('</p:bldLst>','<p:bldGraphic spid="2" grpId="0"><p:bldAsOne/></p:bldGraphic></p:bldLst>'),
@@ -46,13 +54,14 @@ try {
       const xml=timing.writeTiming(s,new Map(ids.map(id=>[id,id])))
       native={editable,effects:s.animations.map(e=>e.effect),changed:xml.includes('dur="600"')}
     }
-    return {simple:unchangedBuild(initial),complex:samples.map(unchangedBuild),native}
+    return {simple:unchangedBuild(initial),complex:samples.map(unchangedBuild),native,build}
   },nativeSlide)
   assert.deepEqual(results.simple,{editable:true,preserved:true,blocked:false})
+  assert.deepEqual(results.build,{editable:true,byParagraph:true,triggers:[['with',150],['click',0],['click',0]],ranges:['0','0','1','1','2','2']})
   for (const variant of results.complex) assert.deepEqual(variant,{editable:false,preserved:true,blocked:true})
   if (nativeSlide) assert.deepEqual(results.native,{
     editable:true,effects:['appear','fade','wipe','fly','spin','motion'],changed:true,
   })
-  console.log('时间线回归通过：按段构建、图形构建、附加效果及斜向运动保持原始 XML。')
+  console.log('段落数量联动和首次自动、后续单击的时间线回归通过。复杂构建及斜向运动保持原始 XML。')
   if (nativeSlide) console.log('已验证原生样本中的六种常规动画仍可编辑。')
 } finally { await browser.close() }

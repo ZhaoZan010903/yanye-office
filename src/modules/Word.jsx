@@ -235,7 +235,17 @@ export default function Word({value, onChange, onPrintPdf, title}) {
       title={kind==='header'?'页眉':'页脚'}>{band.text.replaceAll('{{PAGE}}','1').replaceAll('{{NUMPAGES}}','…')}</div>
   }
   const customMargin=![12.7,25.4,38.1].some(n=>[layout.top,layout.right,layout.bottom,layout.left].every(v=>Math.abs(v-n)<0.06))
-  return <section className="word-editor" aria-label="文字处理">
+  return <section className="word-editor" aria-label="文字处理" onKeyDownCapture={event=>{
+    if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.key.toLowerCase()!=='e' ||
+        event.nativeEvent.isComposing) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.repeat) return
+    const enabled=!latest.current.trackChanges
+    if (onChange({...latest.current,trackChanges:enabled})!==false) {
+      setMessage(enabled ? '已开启修订' : '已关闭修订')
+    }
+  }}>
     <Ribbon label="文字" active={tab} onChange={setTab} tabs={['开始','插入','布局','审阅','视图']}>
       <Action label="查找替换" icon={Search} onClick={()=>{setSearching(!searching);requestAnimationFrame(()=>searchRef.current?.focus())}}/>
       <Action label="导出 PDF" icon={FileDown} onClick={printPdf} disabled={printing || !onPrintPdf}/>

@@ -6,6 +6,7 @@ import { moveSlide, newSlide, readDeck, shapeKinds, slideBoxes, slideLayouts, sl
 import { ShapeProperties, SlideShape } from './SlideShapes.jsx'
 import { slideTransition, speedNames, transitionNames } from './slide-transition.js'
 import {AnimatedPage,AnimationPanel} from './SlideAnimations.jsx'
+import SlideParagraphs from './SlideParagraphs.jsx'
 import {slideTargets} from './slide-animations.js'
 import './slide-animation.css'
 import './slides.css'
@@ -14,13 +15,13 @@ function positioned({ x, y, w, h }) {
   return { left: x * 100 + '%', top: y * 100 + '%', width: w * 100 + '%', height: h * 100 + '%' }
 }
 
-function FreeText({ box, index, selected, select, update }) {
+function FreeText({ box, index, selected, select, update, split }) {
   const drag = useRef(null)
   const [preview,setPreview] = useState(null)
   const position = preview || box
   const style = { ...positioned(position), color:'#' + box.color, fontSize:box.fontSize / 9.6 + 'cqw',
     fontFamily:box.fontFace, fontStyle:box.italic?'italic':undefined, fontWeight:box.bold?700:400, textAlign:box.align }
-  if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}>{box.text}</div>
+  if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}><SlideParagraphs text={box.text} split={split}/></div>
   function dragPosition(e) {
     const start = drag.current
     return textBox({ ...box, x: start.x + (e.clientX - start.clientX) / start.width,
@@ -45,6 +46,7 @@ function FreeText({ box, index, selected, select, update }) {
 
 function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit }) {
   const boxes = slideBoxes(slide.layout)
+  const split=new Set((slide.animations||[]).filter(e=>e.byParagraph || e.paragraph!=null).map(e=>e.target))
   const fields = { title: '幻灯片标题', body: '幻灯片正文', side: '右栏正文' }
   const placeholders = { title: '输入标题', body: slide.layout === 'cover' ? '添加副标题' : '添加正文', side: '添加右栏正文' }
   return <div className="slides-page" style={{ '--slide-paper': '#' + theme.background, '--slide-ink': '#' + theme.ink }}>
@@ -63,11 +65,11 @@ function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit,
       const className = 'slides-text slides-' + field + (slide.layout === 'cover' ? ' cover' : '')
       return edit ? <textarea key={field} className={className} style={style} aria-label={fields[field]}
         placeholder={placeholders[field]} value={slide[field] || ''} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
-        <div key={field} data-animation-target={field} className={className} style={style}>{slide[field]}</div>
+        <div key={field} data-animation-target={field} className={className} style={style}><SlideParagraphs text={slide[field]} split={split.has(field)}/></div>
     })}
-    {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId}
+    {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId} split={split.has(shape.id)}
       onSelect={edit ? ()=>onShapeSelect(shape.id) : undefined} onMove={edit ? patch=>onShapeEdit(shape.id,patch) : undefined}/>)}
-    {(slide.textBoxes || []).map((box,i) => <FreeText key={box.id} box={box} index={i} selected={box.id === boxId}
+    {(slide.textBoxes || []).map((box,i) => <FreeText key={box.id} box={box} index={i} selected={box.id === boxId} split={split.has(box.id)}
       select={() => onBoxSelect?.(box.id)} update={edit ? patch => onBoxEdit(box.id,patch) : undefined} />)}
   </div>
 }

@@ -69,4 +69,8 @@
 .word-revisions ol { max-height:120px; overflow:auto; margin:0; }
 .word-prose ins.word-revision { color:#216543; }
 .word-prose del.word-revision { color:#9a4135; }
+.word-prose [data-break-revision]::after { content:"¶"; margin-inline-start:2px; font-weight:500; }
+.word-prose [data-break-revision="ins"]::after { color:#216543; text-decoration:underline; }
+.word-prose [data-break-revision="del"]::after { color:#9a4135; text-decoration:line-through; }
+@media print { .word-prose [data-break-revision]::after { content:none; } }
 @media print { .word-prose del.word-revision {display:none} .word-prose ins.word-revision {text-decoration:none;color:inherit} }

@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react'
 import { shapeKinds, slideShape } from './slides-model.js'
+import SlideParagraphs from './SlideParagraphs.jsx'
 
 const polygons = {triangle:'50,0 100,100 0,100',diamond:'50,0 100,50 50,100 0,50',rightArrow:'0,25 60,25 60,0 100,50 60,100 60,75 0,75'}
 
-export function SlideShape({ shape, selected, onSelect, onMove }) {
+export function SlideShape({ shape, selected, onSelect, onMove,split }) {
   const drag = useRef(null), [preview,setPreview] = useState(null)
   const box = preview || shape
   const style = { left:box.x*100+'%', top:box.y*100+'%', width:box.w*100+'%', height:box.h*100+'%',
@@ -38,7 +39,7 @@ export function SlideShape({ shape, selected, onSelect, onMove }) {
       if(x!==shape.x || y!==shape.y) onMove({x,y})
     }} onLostPointerCapture={()=>{drag.current=null;setPreview(null)}}>
     <svg viewBox="0 0 100 100" aria-hidden="true" preserveAspectRatio="none" fill={'#'+shape.fill} stroke={'#'+shape.stroke}>{element}</svg>
-    <span>{shape.text}</span>
+    <span><SlideParagraphs text={shape.text} split={split}/></span>
   </div>
 }
 

@@ -8,8 +8,9 @@ import {
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
 import FontPicker from './FontPicker.jsx'
 import SheetRules from './SheetRules.jsx'
-import SheetPivot from './SheetPivot.jsx'
-import { editsPivotResults, refreshPivot } from './sheet-pivot.js'
+import SheetPivot, { PivotSlicers } from './SheetPivot.jsx'
+import { refreshReports } from './sheet-pivot-refresh.js'
+import { editsPivotResults } from './sheet-pivot.js'
 import {chartData,newChart,palettes} from './sheet-chart.js'
 import {conditionalFill,conditionRules,filterRow,listChoices,validationAt} from './spreadsheet.js'
 import './spreadsheet.css'
@@ -207,6 +208,13 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   function tryAction(fn) {
     try { setNotice(''); fn() } catch (error) { setNotice(error.message) }
   }
+  function refreshSelection(all) {
+    tryAction(()=>{
+      const previous=latest.current
+      const next=refreshReports(previous,all ? undefined : sheet.id)
+      if (next!==previous && change(next)) setNotice(all ? '已刷新全部数据透视表。' : '已刷新当前数据透视表。')
+    })
+  }
   function put(text) {
     tryAction(() => updateSheet(writeRange(sheet,row,col,[[text]])))
   }
@@ -319,7 +327,14 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     } catch (error) { if (mounted.current) setNotice(error.message) }
     finally { if (mounted.current) setBusy(false) }
   }
-  return <section className="sheet-module" data-gridlines={gridlines} aria-label="电子表格">
+  return <section className="sheet-module" data-gridlines={gridlines} aria-label="电子表格"
+    onKeyDownCapture={event=>{
+      if (event.key!=='F5' || !event.altKey || event.shiftKey || event.metaKey || event.nativeEvent.isComposing ||
+          !(event.ctrlKey ? book.sheets.some(s=>s.pivot) : sheet.pivot)) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (!event.repeat) refreshSelection(event.ctrlKey)
+    }}>
     <Ribbon label="表格" tabs={['开始','插入','公式','数据','视图','文件']} active={tab}
       onChange={next=>{setTab(next);setWidthEditor(false);setRuleMode('');setFilterOpen(false);setPivotOpen(false)}}/>
     {tab!=='公式' && <div className="sheet-toolbar ribbon-panel">
@@ -369,10 +384,10 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       </RibbonGroup>}
       {(tab==='插入' || tab==='数据') && <RibbonGroup label="透视分析">
         <button className="sheet-action" onClick={()=>setPivotOpen(v=>!v)}>{sheet.pivot?'透视表字段':'数据透视表'}</button>
-        {sheet.pivot && <button className="sheet-action" onClick={()=>tryAction(()=>{
-          const next=refreshPivot(book,sheet)
-          change({...book,sheets:book.sheets.map(s=>s.id===sheet.id?next:s)})
-        })}>刷新数据透视表</button>}
+        {sheet.pivot && <button className="sheet-action" title="刷新当前数据透视表（Alt+F5）" aria-keyshortcuts="Alt+F5"
+          onClick={()=>refreshSelection(false)}>刷新数据透视表</button>}
+        {book.sheets.some(s=>s.pivot) && <button className="sheet-action" title="刷新全部数据透视表（Ctrl+Alt+F5）" aria-keyshortcuts="Control+Alt+F5"
+          onClick={()=>refreshSelection(true)}>全部刷新</button>}
       </RibbonGroup>}
       {tab==='视图' && <><RibbonGroup label="显示">
         <label><input type="checkbox" checked={gridlines} onChange={e=>setGridlines(e.target.checked)}/>网格线</label>
@@ -447,6 +462,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       <button onClick={()=>setRemoving(null)}>取消</button>
     </div>}
     {pivotOpen && <SheetPivot key={sheet.id} book={book} sheet={sheet} range={range} display={display} apply={change} close={()=>setPivotOpen(false)}/>}
+    {Boolean(sheet.pivot?.slicers?.length) && <PivotSlicers key={sheet.id} book={book} sheet={sheet} onChange={change} onError={setNotice}/>}
     {ruleMode && <SheetRules key={sheet.id+':'+rangeName(range)+':'+ruleMode} mode={ruleMode} sheet={sheet} box={range} apply={updateSheet} close={()=>setRuleMode('')} tryAction={tryAction}/>}
     {filterColumn && <div className="sheet-filter"><Filter size={14}/><label>{columnName(col)} 列筛选 <select aria-label="列值筛选" value={JSON.stringify(nativeFilter.columns[filterOffset]??null)} onChange={e=>{
       const columns={...nativeFilter.columns}, values=JSON.parse(e.target.value)
@@ -500,7 +516,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
               const result = display(sheet,ref)
               return <td key={c} data-address={ref} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
                 style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:conditionalFill(compiledRules,rr,cc,result)??cellStyle.fill,textAlign:cellStyle.align,
-                  verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
+                  paddingInlineStart:cellStyle.indent?4+cellStyle.indent*12:undefined,verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
                   textDecorationStyle:String(cellStyle.underline).startsWith('double') ? 'double' : undefined,...cellBorders(cellStyle.borders)}}
                 className={(active?'sheet-selected ':'')+(highlighted.has(rr) && c>=range.left && c<=range.right ? 'sheet-highlight ' : '')+(typeof result==='number'?'sheet-number':'')}
                 onPointerDown={e=>{if(e.button!==0 || ['INPUT','SELECT'].includes(e.target.tagName)) return; e.preventDefault(); drag.current=true; go(rr,cc,true,e.shiftKey)}}

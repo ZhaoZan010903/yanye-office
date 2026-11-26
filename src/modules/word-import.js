@@ -25,6 +25,37 @@ function editableRevision(el) {
     (part.localName==='r' && [...part.children].every(child=>revisionTextNodes.has(child.localName))))
 }
 
+function revisionInfo(el) {
+  return {kind:el.localName,id:'import-'+attr(el,'id'),author:attr(el,'author') || '',date:attr(el,'date') || ''}
+}
+
+function breakChange(p) {
+  const properties=child(child(p,'pPr'),'rPr')
+  return child(properties,'ins') || child(properties,'del')
+}
+
+// Revisions between ordinary, adjacent body paragraphs have two text runs
+// and an independently tracked ending mark. Other containers and section
+// boundaries still use the existing protection against destructive exports.
+function editableBreak(el) {
+  const p=el.parentElement?.parentElement?.parentElement
+  const next=p?.nextElementSibling
+  return p?.namespaceURI===W && p.localName==='p' && ['body','tc'].includes(p.parentElement?.localName) &&
+    el===breakChange(p) && el.children.length===0 && next?.localName==='p' &&
+    !child(child(p,'pPr'),'sectPr') && [p,next].every(n=>!child(child(n,'pPr'),'numPr') &&
+      !flag(child(child(n,'pPr'),'pageBreakBefore')) && !all(n,'br').some(br=>attr(br,'type')==='page'))
+}
+
+function editablePreviousFormat(change) {
+  const p=change.parentElement?.parentElement, prior=child(change,'pPr')
+  if (!prior || p?.localName!=='p' || (!breakChange(p) && !breakChange(p.previousElementSibling))) return false
+  const supported={jc:['val'],spacing:['before','after','line','lineRule'],ind:['left','firstLine','hanging','firstLineChars','hangingChars']}
+  return [...prior.children].every(property=>Object.hasOwn(supported,property.localName) && !property.children.length &&
+    [...property.attributes].every(a=>a.namespaceURI===W && supported[property.localName].includes(a.localName)) &&
+    (property.localName!=='jc' || ['left','center','right','both','justify'].includes(val(property))) &&
+    (property.localName!=='spacing' || !attr(property,'lineRule') || attr(property,'lineRule')==='auto'))
+}
+
 function inlineMarks(pr) {
   const marks = []
   for (const [tag,type] of [['b','bold'],['i','italic'],['u','underline'],['strike','strike']]) {
@@ -148,10 +179,8 @@ export async function readDocx(base64) {
       height:bounded(Math.round(Number(extent?.getAttribute('cy'))/9525),1,10000,180)}}
   }
 
-  async function parseParagraph(p) {
-    const ends=new Set(all(p,'commentRangeEnd').map(el=>attr(el,'id')))
-    const activeComments=new Set()
-    const pr=child(p,'pPr'), style=val(child(pr,'pStyle')) || ''
+  function paragraphFormat(pr) {
+    const style=val(child(pr,'pStyle')) || ''
     const level=headings.get(style) || Number(/^Heading([1-6])$/i.exec(style)?.[1])
     const align=val(child(pr,'jc')), spacing=child(pr,'spacing')
     const attrs={}, indent=child(pr,'ind')
@@ -164,11 +193,22 @@ export async function readDocx(base64) {
     if (level) attrs.level=level
     if (['left','right','center','both','justify'].includes(align)) attrs.align=align==='both'?'justify':align
     if (spacing && (attr(spacing,'lineRule') || 'auto')==='auto' && attr(spacing,'line')) attrs.lineSpacing=bounded(Number(attr(spacing,'line'))/240,0.5,5,1.25)
+    return {type:level?'heading':'paragraph',attrs}
+  }
+  async function parseParagraph(p) {
+    const ends=new Set(all(p,'commentRangeEnd').map(el=>attr(el,'id')))
+    const activeComments=new Set()
+    const pr=child(p,'pPr'), {type,attrs}=paragraphFormat(pr)
+    const ending=breakChange(p), change=child(pr,'pPrChange')
+    if (ending && editableBreak(ending)) attrs.breakRevision=revisionInfo(ending)
+    if (change && editablePreviousFormat(change)) {
+      attrs.paragraphFormatRevision={...revisionInfo(change),kind:'format',previous:paragraphFormat(child(change,'pPr'))}
+    }
     const entries=[], num=child(pr,'numPr')
     const numId=val(child(num,'numId')), depth=bounded(Number(val(child(num,'ilvl'))),0,8,0)
     let inline=[]
     function flush() {
-      entries.push({node:{type:level?'heading':'paragraph',attrs,content:inline},numId:numId==='0'?null:numId,level:depth})
+      entries.push({node:{type,attrs,content:inline},numId:numId==='0'?null:numId,level:depth})
       inline=[]
     }
     function pageBreak() { if (inline.length) flush(); entries.push({node:{type:'pageBreak'}}) }
@@ -200,7 +240,7 @@ export async function readDocx(base64) {
           const rel=targets.get(part.getAttributeNS(R,'id')), href=rel?.getAttribute('Target')
           await walk(part,href && /^(https?:\/\/|mailto:)/i.test(href)?[...marks,{type:'link',attrs:{href}}]:marks,depth+1)
         } else if (name==='ins' || name==='del') {
-          const revision={type:'wordRevision',attrs:{kind:name,id:'import-'+attr(part,'id'),author:attr(part,'author') || '',date:attr(part,'date') || ''}}
+          const revision={type:'wordRevision',attrs:revisionInfo(part)}
           await walk(part,[...marks,revision],depth+1)
         } else if (['smartTag','sdt','sdtContent','fldSimple'].includes(name)) {
           warnings.add('域或内容控件已转换为正文')
@@ -295,8 +335,8 @@ export async function readDocx(base64) {
   }
   const layout=await readSection(child(body,'sectPr'))
   const content=await blocks(body)
-  const protectedRevisions=bandRevisions || structuralChanges.some(tag=>all(body,tag).length) ||
-    [...all(body,'ins'),...all(body,'del')].some(el=>!editableRevision(el))
+  const protectedRevisions=bandRevisions || structuralChanges.some(tag=>all(body,tag).some(el=>tag!=='pPrChange' || !editablePreviousFormat(el))) ||
+    [...all(body,'ins'),...all(body,'del')].some(el=>!editableRevision(el) && !editableBreak(el))
   if (protectedRevisions) {
     warnings.add('格式和结构修订需要保留原版式文件')
   }

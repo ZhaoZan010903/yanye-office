@@ -1,6 +1,6 @@
 import { bounds, evaluator, filterRow, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
 
-export const exchangeNote = 'XLSX 支持值、公式、常用样式、冻结、验证、数值条件格式、按值筛选、分组柱形或条形图，以及单行字段与单值字段的数据透视表。日期转为文本。含复杂图形或外部连接的模板请保留原件。XLSM 从文件中心按原包保存。CSV 导出当前表的计算结果。'
+export const exchangeNote = 'XLSX 支持值、公式、常用样式、冻结、验证、数值条件格式、按值筛选、分组柱形或条形图，以及多级行、单列字段、单值字段和切片器的数据透视表。日期转为文本。含复杂图形或外部连接的模板请保留原件。XLSM 从文件中心按原包保存。CSV 导出当前表的计算结果。'
 const formatByCode = new Map(Object.entries(numberFormats).map(([key,[,code]])=>[code,key]))
 
 export function availableName(proposed, sheets) {
@@ -124,6 +124,7 @@ export async function readXlsx(base64) {
       if (rgb(cell.font?.color)) style.color = rgb(cell.font.color)
       if (cell.fill?.pattern === 'solid' && rgb(cell.fill.fgColor)) style.fill = rgb(cell.fill.fgColor)
       if (['left','center','right'].includes(cell.alignment?.horizontal)) style.align = cell.alignment.horizontal
+      if(cell.alignment?.indent>0) style.indent=cell.alignment.indent
       if (['top','middle','bottom'].includes(cell.alignment?.vertical)) style.vertical = cell.alignment.vertical
       if (cell.border && Object.values(cell.border).some(side=>side?.style)) style.borders = cell.border
       if (Object.keys(style).length) (sheet.styles ??= {})[ref] = style
@@ -153,8 +154,8 @@ export async function readXlsx(base64) {
 export async function writeXlsx(book) {
   if(book.sheets.some(s=>s.advancedPivot)) throw Error('高级透视部件需要原始工作簿才能保存。')
   if(book.sheets.some(s=>s.pivot)) {
-    const {refreshPivot}=await import('./sheet-pivot.js')
-    book={...book,sheets:book.sheets.map(sheet=>sheet.pivot ? refreshPivot(book,sheet) : sheet)}
+    const {refreshReports}=await import('./sheet-pivot-refresh.js')
+    book=refreshReports(book)
   }
   const workbook = await excelWorkbook()
   workbook.calcProperties.fullCalcOnLoad = true
@@ -198,7 +199,7 @@ export async function writeXlsx(book) {
         ...(style.size ? {size:style.size} : {}),
       }
       if (style.fill) cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:argb(style.fill)}}
-      if (style.align || style.vertical) cell.alignment = {...(style.align ? {horizontal:style.align} : {}),...(style.vertical ? {vertical:style.vertical} : {})}
+      if (style.align || style.vertical || style.indent) cell.alignment = {...(style.align ? {horizontal:style.align} : {}),...(style.vertical ? {vertical:style.vertical} : {}),...(style.indent ? {indent:style.indent}: {})}
       if (style.borders) cell.border = style.borders
     }
   }

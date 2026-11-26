@@ -2,3 +2,9 @@
 .slide-animations fieldset{padding:0;border:0}.slide-animations label,.slide-animations li{display:inline-flex;align-items:center;gap:5px}
 .slide-animations ol{padding-left:22px;margin:5px 0}.slide-animations li{display:list-item;margin:4px 0}
 .slide-animations input{width:65px}.slide-animations button,.slide-animations select{margin:0 4px}
+.slide-path-editor{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-block:6px}
+.slide-path-editor svg{width:180px;height:88px;border:1px solid var(--color-hairline);touch-action:none}
+.slide-path-editor circle{stroke:#35667a;fill:#fff;cursor:grab;vector-effect:non-scaling-stroke}
+.slide-path-editor circle.anchor{fill:#35667a}.slide-path-editor circle:focus-visible{stroke:#aa5e2e;stroke-width:2px}
+.slide-path-editor label input{width:clamp(140px,22vw,330px);font:12px Consolas,monospace}
+.slides-page [data-animation-paragraph]{display:block;max-width:100%;max-height:none;min-height:1em}

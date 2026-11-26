@@ -62,8 +62,10 @@ export async function writeDocx(value) {
   let sectionNumber=0, revisionNumber=0, activeLayout=layout
   const assignedRevisionIds=new Set(), reservedRevisionIds=new Set()
   function reserveNativeIds(node) {
-    for(const mark of node.marks||[]) if(mark.type==='wordRevision'){
-      const id=/^import-(\d+)$/.exec(mark.attrs?.id)?.[1]
+    const revisions=[node.attrs?.breakRevision,node.attrs?.paragraphFormatRevision,
+      ...(node.marks||[]).filter(mark=>mark.type==='wordRevision').map(mark=>mark.attrs)]
+    for(const mark of revisions) {
+      const id=/^import-(\d+)$/.exec(mark?.id)?.[1]
       if(id!=null) reservedRevisionIds.add(id)
     }
     node.content?.forEach(reserveNativeIds)
@@ -106,7 +108,7 @@ export async function writeDocx(value) {
     entries.push([rid,'hyperlink',href,true])
     return '<w:hyperlink r:id="' + rid + '">'
   }
-  function paragraph(n, num) {
+  function paragraphProperties(n,num) {
     const a = n.attrs ?? {}
     let props = n.type === 'heading' ? tag('pStyle','Heading' + a.level) : ''
     if (num) props += '<w:numPr>' + tag('ilvl',num.level) + tag('numId',num.id) + '</w:numPr>'
@@ -121,6 +123,16 @@ export async function writeDocx(value) {
     else if (Number.isFinite(a.firstLinePt)) indent.push('w:' + (a.firstLinePt < 0 ? 'hanging' : 'firstLine') + '="' + Math.round(Math.abs(a.firstLinePt)*20) + '"')
     if (indent.length) props += '<w:ind ' + indent.join(' ') + '/>'
     if (a.align) props += tag('jc',a.align === 'justify' ? 'both' : a.align)
+    return props
+  }
+  function paragraph(n, num) {
+    let props=paragraphProperties(n,num)
+    const ending=n.attrs?.breakRevision, format=n.attrs?.paragraphFormatRevision
+    if (ending && ['ins','del'].includes(ending.kind)) {
+      props+='<w:rPr>'+revisionStart(ending).replace(/>$/,'/>')+'</w:rPr>'
+    }
+    if (format?.previous) props+=revisionStart({...format,kind:'pPrChange'})+
+      '<w:pPr>'+paragraphProperties(format.previous)+'</w:pPr></w:pPrChange>'
     return '<w:p><w:pPr>' + props + '</w:pPr>' + comments.paragraph(children(n),inline,revisionStart,linkStart) + '</w:p>'
   }
   function table(n) {

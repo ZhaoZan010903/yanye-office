@@ -5,11 +5,12 @@ export const relNS = 'http://schemas.openxmlformats.org/officeDocument/2006/rela
 export const packageNS = 'http://schemas.openxmlformats.org/package/2006/relationships'
 export const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 export const escapeXml = value => String(value).replace(/[<>&"']/g, ch => ({'<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;', "'":'&apos;'}[ch]))
-export function scan(xml, open, close) {
+export function scan(xml, open, close, text) {
   const parser = new SaxesParser({xmlns:true})
   parser.on('doctype', () => { throw new Error('工作簿 XML 声明了不支持的 DTD。') })
   parser.on('opentag', node => open(node, parser.position))
   if (close) parser.on('closetag', node => close(node, parser.position))
+  if (text) parser.on('text', text)
   parser.write(xml).close()
 }
 export const attr = (node, key) => node.attributes[key]?.value

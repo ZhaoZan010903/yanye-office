@@ -41,7 +41,7 @@ export function describeSource(markdown) {
 
     const plain = line.replace(/`[^`]*`/gu, '')
     if (plain.trimStart().startsWith('$$')) sourceOnly = true
-    if (/^ {0,3}\[\^?.+\]:\s|\[\^[^\]]+\]|<\/?[A-Za-z][A-Za-z\d-]*(?:\s|\/?>)|<!--|^ {0,3}:::/u.test(plain)) sourceOnly = true
+    if (/<\/?[A-Za-z][A-Za-z\d-]*(?:\s|\/?>)|<!--|^ {0,3}:::/u.test(plain)) sourceOnly = true
   }
 
   return { headings, completed, total, characters: [...normalized.replace(/\s/gu, '')].length, sourceOnly }

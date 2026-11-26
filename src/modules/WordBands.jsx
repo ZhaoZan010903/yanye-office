@@ -1,12 +1,18 @@
 import React, { useRef, useState } from 'react'
 import { bandTypes, pageBand, pageTypes } from './word-bands.js'
 
-export default function WordBands({layout,onChange}) {
+export default function WordBands({layout,localBands,hasPrevious,onChange}) {
   const [kind,setKind] = useState('header')
   const [type,setType] = useState('default')
   const input = useRef(null)
   const band = pageBand(layout,type,kind)
-  const patch = fields => onChange({bands:{...layout.bands,[type]:{...layout.bands?.[type],[kind]:{...band,...fields}}}})
+  const patch = fields => onChange({bands:{...localBands,[type]:{...localBands?.[type],[kind]:{...band,...fields}}}})
+  function linkPrevious(linked) {
+    if (!linked) return patch({})
+    const slots={...localBands?.[type]}
+    delete slots[kind]
+    onChange({bands:{...localBands,[type]:slots}})
+  }
   function insert(field) {
     const start=input.current.selectionStart, end=input.current.selectionEnd
     patch({text:band.text.slice(0,start)+field+band.text.slice(end)})
@@ -16,8 +22,9 @@ export default function WordBands({layout,onChange}) {
     <label>页种 <select value={type} onChange={e=>setType(e.target.value)}>
       {Object.entries(pageTypes).filter(([k])=>k==='default'||(k==='first'?layout.differentFirst:layout.differentEven))
         .map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
-    <label>位置 <select value={kind} onChange={e=>setKind(e.target.value)}>
+    <label>位置 <select aria-label="页眉页脚位置" value={kind} onChange={e=>setKind(e.target.value)}>
       {Object.entries(bandTypes).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+    {hasPrevious && <label><input type="checkbox" checked={!localBands?.[type]?.[kind]} onChange={e=>linkPrevious(e.target.checked)}/>与上一节相同</label>}
     <textarea ref={input} rows={2} aria-label={pageTypes[type]+bandTypes[kind]} value={band.text} onChange={e=>patch({text:e.target.value})}/>
     <label>对齐 <select aria-label="页眉页脚对齐" value={band.align} onChange={e=>patch({align:e.target.value})}>
       <option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>

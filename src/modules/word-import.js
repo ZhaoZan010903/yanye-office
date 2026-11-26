@@ -1,5 +1,6 @@
-import { defaultLayout, highlights, maxImageBytes, papers, validColor, validFont, wordValue } from './word-model.js'
+import { defaultLayout, highlights, maxImageBytes, papers, validColor, validFont, wordValue, sectionLayout } from './word-model.js'
 import { bandTypes, pageTypes, readBand } from './word-bands.js'
+import {nativeSectionProperties} from './word-section-xml.js'
 import {readComments} from './word-comments.js'
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -11,6 +12,18 @@ const val = el => attr(el,'val')
 const flag = el => el && !['0','false','none','off'].includes(val(el))
 const bounded = (n,min,max,fallback) => Number.isFinite(n) && n>=min && n<=max ? n : fallback
 const paragraph = () => ({ type:'paragraph' })
+const structuralChanges=['pPrChange','rPrChange','tblPrChange','tblGridChange','cellIns','cellDel','cellMerge','trPrChange','tcPrChange','sectPrChange','moveFrom','moveTo']
+const revisionTextNodes=new Set(['t','delText','tab','noBreakHyphen','rPr','commentReference'])
+function editableRevision(el) {
+  if(!['p','hyperlink'].includes(el.parentElement?.localName)) return false
+  const children=[...el.children]
+  const cursorBookmark=children.find(part=>part.localName==='bookmarkStart' && attr(part,'name')==='_GoBack')
+  const cursorEnd=cursorBookmark && children.find(part=>part.localName==='bookmarkEnd' && attr(part,'id')===attr(cursorBookmark,'id'))
+  return children.every(part=>
+    (cursorEnd && (part===cursorBookmark || part===cursorEnd)) ||
+    ['commentRangeStart','commentRangeEnd','proofErr'].includes(part.localName) ||
+    (part.localName==='r' && [...part.children].every(child=>revisionTextNodes.has(child.localName))))
+}
 
 function inlineMarks(pr) {
   const marks = []
@@ -172,8 +185,8 @@ export async function readDocx(base64) {
         }
         if (name==='pPr' || name==='rPr') continue
         if (name==='r') { await walk(part,[...marks,...inlineMarks(child(part,'rPr'))],depth+1); continue }
-        if (name==='t' || name==='tab' || name==='noBreakHyphen') {
-          const text=name==='t'?part.textContent:name==='tab'?'\t':'‑'
+        if (name==='t' || name==='delText' || name==='tab' || name==='noBreakHyphen') {
+          const text=(name==='t' || name==='delText')?part.textContent:name==='tab'?'\t':'‑'
           if (text) {
             const annotated=[...marks,...[...activeComments].map(id=>{anchored.add(id);return {type:'wordComment',attrs:comments.get(id)}})]
             inline.push({type:'text',text,...(annotated.length?{marks:annotated}: {})})
@@ -186,8 +199,11 @@ export async function readDocx(base64) {
         } else if (name==='hyperlink') {
           const rel=targets.get(part.getAttributeNS(R,'id')), href=rel?.getAttribute('Target')
           await walk(part,href && /^(https?:\/\/|mailto:)/i.test(href)?[...marks,{type:'link',attrs:{href}}]:marks,depth+1)
-        } else if (['ins','smartTag','sdt','sdtContent','fldSimple'].includes(name)) {
-          warnings.add('修订、域或内容控件已转换为正文')
+        } else if (name==='ins' || name==='del') {
+          const revision={type:'wordRevision',attrs:{kind:name,id:'import-'+attr(part,'id'),author:attr(part,'author') || '',date:attr(part,'date') || ''}}
+          await walk(part,[...marks,revision],depth+1)
+        } else if (['smartTag','sdt','sdtContent','fldSimple'].includes(name)) {
+          warnings.add('域或内容控件已转换为正文')
           await walk(part,marks,depth+1)
         } else if (['del','pict','object','instrText','footnoteReference','endnoteReference'].includes(name)) warnings.add('部分审阅标记、域或嵌入对象已略过')
       }
@@ -200,7 +216,11 @@ export async function readDocx(base64) {
     if (depth>12) throw new Error('文档表格嵌套过深。')
     const entries=[]
     for (const el of container.children) {
-      if (el.localName==='p') entries.push(...await parseParagraph(el))
+      if (el.localName==='p') {
+        entries.push(...await parseParagraph(el))
+        const section=child(child(el,'pPr'),'sectPr')
+        if (depth===0 && section) entries.push({node:{type:'sectionBreak',attrs:{layout:await readSection(section)}}})
+      }
       if (el.localName==='sdt' && child(el,'sdtContent')) {
         warnings.add('内容控件已转换为正文')
         for (const n of await blocks(child(el,'sdtContent'),depth+1)) entries.push({node:n})
@@ -229,37 +249,60 @@ export async function readDocx(base64) {
     }
     return organizeLists(entries,numbers)
   }
-  const layout={...defaultLayout}, sections=all(body,'sectPr'), section=sections.at(-1), size=child(section,'pgSz'), margins=child(section,'pgMar')
-  if (size) {
-    const width=Number(attr(size,'w')), height=Number(attr(size,'h')), short=Math.min(width,height), long=Math.max(width,height)
-    layout.landscape=attr(size,'orient')==='landscape' || width>height
-    const mm=[short,long].map(n=>n*25.4/1440)
-    const match=Object.entries(papers).find(([,dims])=>dims.every((v,i)=>Math.abs(v-mm[i])<0.35))
-    if (match) layout.paper=match[0]
-    else if (mm.every(n=>n>=25 && n<=560)) {layout.paper='custom';layout.size=mm}
-    else warnings.add('纸张尺寸超出可编辑范围')
-  }
-  for(const side of ['top','bottom','left','right']) if (attr(margins,side)!=null) layout[side]=Number(attr(margins,side))*25.4/1440
-  if (sections.length>1) warnings.add('多节页面设置已统一')
-  if (flag(child(section,'titlePg'))) layout.differentFirst=true
-  if (flag(child(await xml('word/settings.xml'),'evenAndOddHeaders'))) layout.differentEven=true
-  for (const kind of Object.keys(bandTypes)) {
-    const distance=attr(margins,kind)
-    if (distance!=null) layout[kind+'Distance']=Number(distance)*25.4/1440
-    for (const ref of all(section,kind+'Reference')) {
-      const type=attr(ref,'type'), relation=targets.get(ref.getAttributeNS(R,'id'))
-      if (!Object.hasOwn(pageTypes,type) || !relation || relation.getAttribute('TargetMode')==='External') continue
-      const path=new URL(relation.getAttribute('Target'),'https://local.invalid/word/document.xml')
-      const root=path.origin==='https://local.invalid' && await xml(decodeURIComponent(path.pathname.slice(1)))
-      if (!root) {warnings.add('部分页眉页脚缺少引用部件');continue}
-      const band=readBand(root,message=>warnings.add(message))
-      if (band.text) ((layout.bands??={})[type]??={})[kind]=band
+  const settings=await xml('word/settings.xml')
+  let bandRevisions=false
+  async function readSection(section) {
+    const layout={...defaultLayout}, size=child(section,'pgSz'), margins=child(section,'pgMar')
+    layout.nativeSection=nativeSectionProperties(section,message=>warnings.add(message))
+    const columns=child(section,'cols')
+    if (columns) {
+      layout.columns=Number(attr(columns,'num')) || 1
+      if (attr(columns,'space')!=null) layout.columnGap=Number(attr(columns,'space'))*25.4/1440
+      if ([...columns.children].some(el=>el.localName==='col')) warnings.add('不等宽分栏在工作区按等宽预览，原分栏宽度保留到 DOCX')
     }
+    layout.start=val(child(section,'type')) || 'nextPage'
+    const pageStart=attr(child(section,'pgNumType'),'start')
+    if (pageStart!=null) layout.pageStart=Number(pageStart)
+    if (size) {
+      const width=Number(attr(size,'w')), height=Number(attr(size,'h')), short=Math.min(width,height), long=Math.max(width,height)
+      layout.landscape=attr(size,'orient')==='landscape' || width>height
+      const mm=[short,long].map(n=>n*25.4/1440)
+      const match=Object.entries(papers).find(([,dims])=>dims.every((v,i)=>Math.abs(v-mm[i])<0.35))
+      if (match) layout.paper=match[0]
+      else if (mm.every(n=>n>=25 && n<=560)) {layout.paper='custom';layout.size=mm}
+      else warnings.add('纸张尺寸超出可编辑范围')
+    }
+    for(const side of ['top','bottom','left','right']) if (attr(margins,side)!=null) layout[side]=Number(attr(margins,side))*25.4/1440
+    if (flag(child(section,'titlePg'))) layout.differentFirst=true
+    if (flag(child(settings,'evenAndOddHeaders'))) layout.differentEven=true
+    for (const kind of Object.keys(bandTypes)) {
+      const distance=attr(margins,kind)
+      if (distance!=null) layout[kind+'Distance']=Number(distance)*25.4/1440
+      for (const ref of all(section,kind+'Reference')) {
+        const type=attr(ref,'type'), relation=targets.get(ref.getAttributeNS(R,'id'))
+        if (!Object.hasOwn(pageTypes,type) || !relation || relation.getAttribute('TargetMode')==='External') continue
+        const path=new URL(relation.getAttribute('Target'),'https://local.invalid/word/document.xml')
+        const root=path.origin==='https://local.invalid' && await xml(decodeURIComponent(path.pathname.slice(1)))
+        if (!root) {warnings.add('部分页眉页脚缺少引用部件');continue}
+        if (['ins','del',...structuralChanges].some(tag=>all(root,tag).length)) bandRevisions=true
+        const band=readBand(root,message=>warnings.add(message))
+        layout.bands??={}
+        layout.bands[type]??={}
+        layout.bands[type][kind]=band
+      }
+    }
+    return sectionLayout(layout)
+  }
+  const layout=await readSection(child(body,'sectPr'))
+  const content=await blocks(body)
+  const protectedRevisions=bandRevisions || structuralChanges.some(tag=>all(body,tag).length) ||
+    [...all(body,'ins'),...all(body,'del')].some(el=>!editableRevision(el))
+  if (protectedRevisions) {
+    warnings.add('格式和结构修订需要保留原版式文件')
   }
   if (Object.keys(zip.files).some(p=>/word\/(?:footnotes|endnotes|charts|embeddings|vbaProject)/i.test(p))) warnings.add('脚注、尾注或嵌入部件未参与转换')
   const extended=await xml('word/commentsExtended.xml')
   if(extended && all(extended,'commentEx').some(el=>[...el.attributes].some(a=>a.localName==='paraIdParent' || (a.localName==='done' && ['true','1'].includes(a.value))))) warnings.add('批注回复与解决状态需要保留原版式文件')
-  const content=await blocks(body)
   if(comments.size!==anchored.size || all(body,'commentReference').some(el=>!anchored.has(attr(el,'id')))) warnings.add('跨段、点状或对象批注请使用保留原版式打开')
-  return wordValue({layout,doc:{type:'doc',content:content.length?content:[paragraph()]},compatibility:[...warnings]})
+  return wordValue({layout,protectedRevisions,trackChanges:Boolean(flag(child(settings,'trackRevisions'))),doc:{type:'doc',content:content.length?content:[paragraph()]},compatibility:[...warnings]})
 }

@@ -63,3 +63,10 @@
  .word-print-root tr { break-inside:avoid; }
 }
 @media(max-width:800px) { .word-scroll { padding:12px; } .word-tools,.word-tabs { padding-inline:6px; } }
+
+.word-sheet .word-prose { column-count:var(--word-columns,1); column-gap:var(--word-column-gap,12.7mm); }
+.word-section-nav,.word-revisions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid var(--color-hairline); }
+.word-revisions ol { max-height:120px; overflow:auto; margin:0; }
+.word-prose ins.word-revision { color:#216543; }
+.word-prose del.word-revision { color:#9a4135; }
+@media print { .word-prose del.word-revision {display:none} .word-prose ins.word-revision {text-decoration:none;color:inherit} }

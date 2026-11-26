@@ -1,5 +1,6 @@
-import { highlights, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import { highlights, paperDimensions, validColor, validFont, wordValue, sectionLayout } from './word-model.js'
 import { bandTypes, pageBand, pageTypes, writeBand } from './word-bands.js'
+import {sectionPropertiesXml} from './word-section-xml.js'
 import {commentWriter} from './word-comments.js'
 export { readDocx } from './word-import.js'
 
@@ -56,7 +57,28 @@ function runProperties(marks) {
 export async function writeDocx(value) {
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
-  const { doc, layout } = wordValue(value)
+  const { doc, layout, trackChanges, protectedRevisions } = wordValue(value)
+  if (protectedRevisions) throw Error('原件包含格式、段落或对象修订。请在 WPS 或 Word 审阅这些修订后再写回，以保留审阅记录。')
+  let sectionNumber=0, revisionNumber=0, activeLayout=layout
+  const assignedRevisionIds=new Set(), reservedRevisionIds=new Set()
+  function reserveNativeIds(node) {
+    for(const mark of node.marks||[]) if(mark.type==='wordRevision'){
+      const id=/^import-(\d+)$/.exec(mark.attrs?.id)?.[1]
+      if(id!=null) reservedRevisionIds.add(id)
+    }
+    node.content?.forEach(reserveNativeIds)
+  }
+  reserveNativeIds(doc)
+  function revisionStart(mark) {
+    let id=/^import-(\d+)$/.exec(mark.id)?.[1]
+    if (id==null || assignedRevisionIds.has(id)) {
+      while(reservedRevisionIds.has(String(revisionNumber)) || assignedRevisionIds.has(String(revisionNumber))) revisionNumber++
+      id=String(revisionNumber++)
+    }
+    assignedRevisionIds.add(id)
+    const date=mark.date ? ' w:date="'+escape(mark.date)+'"' : ''
+    return '<w:'+mark.kind+' w:id="'+id+'" w:author="'+escape(mark.author)+'"'+date+'>'
+  }
   const entries = [['rStyles','styles','styles.xml'],['rNumbers','numbering','numbering.xml']]
   const lists = []
   const comments=commentWriter(escape)
@@ -74,13 +96,15 @@ export async function writeDocx(value) {
       const size = ' cx="' + cx + '" cy="' + cy + '"/>'
       return '<w:r><w:drawing><wp:inline><wp:extent' + size + '<wp:docPr id="' + i + '" name="Image ' + i + '" descr="' + escape(a.alt) + '"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext' + size + '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
     }
-    const parts = String(n.text ?? '').split('\t').map(s => '<w:t xml:space="preserve">' + escape(s) + '</w:t>').join('<w:tab/>')
-    const run = '<w:r>' + runProperties(n.marks) + parts + '</w:r>'
-    const link = n.marks?.find(m => m.type === 'link')?.attrs?.href
-    if (!link || !/^(?:https?:\/\/|mailto:)/i.test(link)) return run
+    const revision=n.marks?.find(m=>m.type==='wordRevision')?.attrs
+    const textTag=revision?.kind==='del'?'delText':'t'
+    const parts = String(n.text ?? '').split('\t').map(s => '<w:'+textTag+' xml:space="preserve">' + escape(s) + '</w:'+textTag+'>').join('<w:tab/>')
+    return '<w:r>' + runProperties(n.marks) + parts + '</w:r>'
+  }
+  function linkStart(href) {
     const rid = 'rLink' + entries.length
-    entries.push([rid,'hyperlink',link,true])
-    return '<w:hyperlink r:id="' + rid + '">' + run + '</w:hyperlink>'
+    entries.push([rid,'hyperlink',href,true])
+    return '<w:hyperlink r:id="' + rid + '">'
   }
   function paragraph(n, num) {
     const a = n.attrs ?? {}
@@ -97,13 +121,13 @@ export async function writeDocx(value) {
     else if (Number.isFinite(a.firstLinePt)) indent.push('w:' + (a.firstLinePt < 0 ? 'hanging' : 'firstLine') + '="' + Math.round(Math.abs(a.firstLinePt)*20) + '"')
     if (indent.length) props += '<w:ind ' + indent.join(' ') + '/>'
     if (a.align) props += tag('jc',a.align === 'justify' ? 'both' : a.align)
-    return '<w:p><w:pPr>' + props + '</w:pPr>' + comments.paragraph(children(n),inline) + '</w:p>'
+    return '<w:p><w:pPr>' + props + '</w:pPr>' + comments.paragraph(children(n),inline,revisionStart,linkStart) + '</w:p>'
   }
   function table(n) {
     const borders = ['top','left','bottom','right','insideH','insideV'].map(k=>'<w:' + k + ' w:val="single" w:sz="4" w:color="B4B3AE"/>').join('')
     const rows = children(n)
     const columns = Math.max(1, ...rows.map(r=>children(r).reduce((s,c)=>s+(Number(c.attrs?.colspan)||1),0)))
-    const width = Math.round(twips(paperDimensions(layout)[0] - layout.left - layout.right)/columns)
+    const width = Math.round(twips(paperDimensions(activeLayout)[0] - activeLayout.left - activeLayout.right)/columns)
     const pending = new Map()
     const result = rows.map(row => {
       let output = '', col = 0
@@ -139,32 +163,59 @@ export async function writeDocx(value) {
     }
     return paragraph(n)
   }
-  const body = children(doc).map(n=>block(n)).join('')
-  const [width,height] = paperDimensions(layout)
   const parts = [['document','document.main'],['styles','styles'],['numbering','numbering']]
+  let usedEven=false
+  function writeSection(layout) {
+    sectionNumber++
+    if (layout.differentEven) usedEven=true
+    const [width,height] = paperDimensions(layout)
+    let references = ''
+    for (const kind of Object.keys(bandTypes)) {
+      for (const [index,type] of Object.keys(pageTypes).entries()) {
+        const band = pageBand(layout,type,kind)
+        if (!band.text && !layout.bands?.[type]?.[kind]) continue
+        const name = kind+((sectionNumber-1)*3+index+1), id = 'r'+name
+        zip.file('word/'+name+'.xml', xml+writeBand(band,kind,escape))
+        parts.push([name,kind])
+        entries.push([id,kind,name+'.xml'])
+        references += '<w:'+kind+'Reference w:type="'+type+'" r:id="'+id+'"/>'
+      }
+    }
+    return '<w:sectPr>'+references+sectionPropertiesXml(layout,width,height,escape)+'</w:sectPr>'
+  }
+  // A section ends on the paragraph that contains its sectPr. The last
+  // section's properties are direct children of the document body.
+  let body='', pending=[]
+  function emitSection(nodes, settings, boundary) {
+    activeLayout=sectionLayout(settings)
+    let data=nodes.map(node=>block(node)).join('')
+    const section=writeSection(activeLayout)
+    if (boundary) {
+      const last=nodes.at(-1)
+      if (last?.type==='paragraph' || last?.type==='heading') {
+        const position=data.lastIndexOf('</w:pPr>')
+        data=data.slice(0,position)+section+data.slice(position)
+      } else data+='<w:p><w:pPr>'+section+'</w:pPr></w:p>'
+    }
+    body+=data
+    return section
+  }
+  for (const node of children(doc)) {
+    if (node.type==='sectionBreak') { emitSection(pending,node.attrs?.layout,true); pending=[] }
+    else pending.push(node)
+  }
+  const lastSection=emitSection(pending,layout,false)
   if(comments.notes.length) {
     parts.push(['comments','comments'])
     entries.push(['rComments','comments','comments.xml'])
     zip.file('word/comments.xml',xml+comments.body())
   }
-  let references = ''
-  for (const kind of Object.keys(bandTypes)) {
-    for (const [index,type] of Object.keys(pageTypes).entries()) {
-      const band = pageBand(layout,type,kind)
-      if (!band.text) continue
-      const name = kind+(index+1), id = 'r'+name
-      zip.file('word/'+name+'.xml', xml+writeBand(band,kind,escape))
-      parts.push([name,kind])
-      entries.push([id,kind,name+'.xml'])
-      references += '<w:'+kind+'Reference w:type="'+type+'" r:id="'+id+'"/>'
-    }
-  }
-  if (layout.differentEven) {
+  if (usedEven || trackChanges) {
     parts.push(['settings','settings'])
     entries.push(['rSettings','settings','settings.xml'])
-    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'"><w:evenAndOddHeaders/></w:settings>')
+    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'">'+(trackChanges?'<w:trackRevisions/>':'')+(usedEven?'<w:evenAndOddHeaders/>':'')+'</w:settings>')
   }
-  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + body + '<w:sectPr>'+references+'<w:pgSz w:w="' + twips(width) + '" w:h="' + twips(height) + '"' + (layout.landscape ? ' w:orient="landscape"' : '') + '/><w:pgMar ' + ['top','right','bottom','left'].map(side=>'w:' + side + '="' + twips(layout[side]) + '"').join(' ') + ' w:header="'+twips(layout.headerDistance??12.7)+'" w:footer="'+twips(layout.footerDistance??12.7)+'" w:gutter="0"/>'+(layout.differentFirst ? '<w:titlePg/>' : '')+'</w:sectPr></w:body></w:document>')
+  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>' + body + lastSection+'</w:body></w:document>')
   zip.file('word/styles.xml',styles())
   zip.file('word/numbering.xml',numbering(lists))
   zip.file('word/_rels/document.xml.rels',relationships(entries))

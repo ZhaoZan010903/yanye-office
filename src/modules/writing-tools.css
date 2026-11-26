@@ -29,10 +29,6 @@
 .md-figure-content img { display: block; width: auto; max-width: 100%; max-height: 160px; margin-top: 8px; }
 .md-figure-content [role=alert] { color: var(--color-marker-red); }
 .md-math .katex-display { text-align: left; }
-.md-source-large { height: max(350px,54vh); border: 1px solid var(--color-hairline); border-radius: 4px; }
-.md-source-large .cm-editor { height: 100%; }
-.md-source-large .cm-scroller { overflow: auto; font: 13px/1.77 var(--mono); }
-.md-source-large .cm-gutters { background: var(--color-paper); border-color: var(--color-hairline); }
 .md-fence { position:relative; margin:16px 0; border:1px solid var(--color-hairline); border-radius:4px; background:var(--color-paper); }
 .md-fence-tools { display:flex; justify-content:space-between; align-items:center; min-height:28px; padding:2px 8px; font:500 12px/1.5 var(--font-sans,system-ui); color:var(--muted); }
 .md-fence-tools button, .md-fence-tools input, .md-inline-math button { background:transparent; border:0; border-radius:4px; color:inherit; font:inherit; }

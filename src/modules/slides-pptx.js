@@ -1,4 +1,5 @@
 import { newSlide, shapeKinds, slideBoxes, slideShape, slideThemes, textBox } from './slides-model.js'
+import { readTiming, slideTargets, writeTiming } from './slide-animations.js'
 import { parseTransition, transitionXml } from './slide-transition.js'
 
 const W = 40 / 3
@@ -52,16 +53,22 @@ export async function exportPptx(deck, name) {
     }
   }
   const effects=deck.slides.map(item=>transitionXml(item.transition || {}))
-  if (!effects.some(Boolean)) return file.write({ outputType:'base64',compression:true })
+  if (!effects.some(Boolean) && !deck.slides.some(s=>s.animations?.length || s.nativeTiming)) return file.write({ outputType:'base64',compression:true })
   const {default:Zip}=await import('jszip')
   const pack=await Zip.loadAsync(await file.write({ outputType:'uint8array' }))
   for (const [index,effect] of effects.entries()) {
-    if (!effect) continue
+    const item=deck.slides[index]
+    if (!effect && !item.animations?.length && !item.nativeTiming) continue
     const path='ppt/slides/slide'+(index+1)+'.xml'
     const xml=await pack.file(path).async('string')
-    // Our pptxgenjs slide ends with a color map override. The transition follows it.
+    // Read native IDs from our generated shape tree rather than assuming
+    // PowerPoint numbers shapes consecutively.
+    const ids=[...xml.matchAll(/<p:(?:sp|pic)>(?:(?!<\/p:(?:sp|pic)>)[\s\S])*?<p:cNvPr\s+id="(\d+)"/g)].map(match=>match[1])
+    const targets=slideTargets(item)
+    if (ids.length!==targets.length) throw Error('无法匹配导出演示对象的动画目标。')
+    const timing=writeTiming(item,new Map(targets.map(([key],i)=>[key,ids[i]])))
     if (!xml.includes('</p:clrMapOvr>')) throw new Error('无法定位幻灯片的配色映射。')
-    pack.file(path,xml.replace('</p:clrMapOvr>','</p:clrMapOvr>'+effect))
+    pack.file(path,xml.replace('</p:clrMapOvr>','</p:clrMapOvr>'+effect+timing))
   }
   return pack.generateAsync({type:'base64',compression:'DEFLATE'})
 }
@@ -155,7 +162,8 @@ export async function importPptx(base64) {
       name: nodes(sp, 'cNvPr')[0]?.getAttribute('name') || '',
       text: shapeText(sp),
     }))
-    const boxes = [], geometry = []
+    const boxes = [], geometry = [], animationTargets=new Map()
+    const identify=(sp,key)=>{const id=nodes(sp,'cNvPr')[0]?.getAttribute('id'); if(id) animationTargets.set(id,key)}
     const ownTitle=/^YanYe (cover|text|columns|image) (?:positioned )?title$/
     const declaredTitle=objects.find(s=>ownTitle.test(s.name) || ['ctrTitle','title'].includes(s.kind))
     let positionedTitle
@@ -191,7 +199,8 @@ export async function importPptx(base64) {
         const fill=[...propsShape.children].find(el=>el.localName==='solidFill'), line=nodes(propsShape,'ln')[0]
         geometry.push(slideShape({...format,kind,rotation:Number(xf.getAttribute('rot'))/60000,
           fill:fill && nodes(fill,'srgbClr')[0]?.getAttribute('val'),stroke:line && nodes(line,'srgbClr')[0]?.getAttribute('val')}))
-      } else boxes.push(textBox(format))
+        identify(sp,geometry.at(-1).id)
+      } else { const box=textBox(format); boxes.push(box); identify(sp,box.id) }
       return false
     })
     const title = declaredTitle || shapes.find(s=>s.sp===positionedTitle?.sp) || shapes.find(s => s.text.trim())
@@ -200,6 +209,10 @@ export async function importPptx(base64) {
     const body = rest.find(s => s.name === 'YanYe ' + layout + ' body')
     const side = rest.find(s => s.name === 'YanYe columns side')
     const item = newSlide({ layout, title: title?.text || '', body: body ? body.text : rest.map(s => s.text).filter(Boolean).join('\n\n'), side: side?.text || '' })
+    if (title) identify(title.sp,'title')
+    if (body) identify(body.sp,'body')
+    else if (rest.length===1) identify(rest[0].sp,'body')
+    if (side) identify(side.sp,'side')
     if (positionedTitle) {
       const {id,text,...format}=positionedTitle.box
       item.titleBox=format
@@ -220,6 +233,7 @@ export async function importPptx(base64) {
         reader.readAsDataURL(blob)
       })
       item.image = await loadImage(data, imagePath.split('/').pop())
+      identify(pic,'image')
       if (item.layout === 'text') item.layout = 'image'
       break
     }
@@ -228,6 +242,7 @@ export async function importPptx(base64) {
       const notesDoc = await xml(notes.path)
       item.notes = nodes(notesDoc, 'sp').filter(s => nodes(s, 'ph')[0]?.getAttribute('type') === 'body').map(shapeText).join('\n').trim()
     }
+    Object.assign(item,readTiming(content,animationTargets))
     slides.push(item)
   }
   if (!slides.length) throw new Error('没有找到可导入的幻灯片。')

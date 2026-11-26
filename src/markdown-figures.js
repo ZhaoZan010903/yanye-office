@@ -1,3 +1,10 @@
+export function fenceFigure(language) {
+  const name = String(language || '').toLowerCase()
+  if (name === 'meried' || name === 'mermaid') return 'mermaid'
+  if (name === 'flow' || name === 'sequence') return name
+  return name === 'math' || name === 'latex' ? 'math' : null
+}
+
 // Collect renderable constructs without treating code examples as formulas.
 export function markdownFigures(markdown) {
   // Offsets match the textarea, which always represents a line break as LF.
@@ -29,7 +36,7 @@ export function markdownFigures(markdown) {
     if (begin) {
       const lang=begin[2].toLowerCase()
       fence={close:new RegExp('^ {0,3}'+begin[1][0]+'{'+begin[1].length+',}\\s*$'),line:i+1,from:start,bodyStart:next,
-        kind:['mermaid','meried'].includes(lang)?'mermaid':['math','latex'].includes(lang)?'math':null}
+        kind:fenceFigure(lang)}
       continue
     }
     if (trimmed==='$$') {math={kind:'math',line:i+1,from:start,bodyStart:next};continue}

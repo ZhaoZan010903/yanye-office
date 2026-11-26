@@ -5,7 +5,7 @@ import { Dialog, IconButton } from './workspace-ui.jsx'
 import { FileGlyph } from './file-glyph.jsx'
 import './file-center.css'
 
-const icons = { docx:FileText, xlsx:Sheet, pptx:Presentation, md:FileText, txt:FileText, pdf:File }
+const icons = { docx:FileText, xlsx:Sheet, xlsm:Sheet, pptx:Presentation, md:FileText, txt:FileText, pdf:File }
 const newFileTypes = Object.entries(fileTypes).filter(([, type]) => !type.openOnly)
 const OriginalReplaceDialog = lazy(() => import('./original-replace-dialog.jsx'))
 const canReplace = row => !row.isDirectory && ['docx','xlsx','pptx'].includes(row.extension)

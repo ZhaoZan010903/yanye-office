@@ -6,6 +6,18 @@ import { wordValue, findText } from '../src/modules/word-model.js'
 import { Schema } from '@tiptap/pm/model'
 import {bandPrintStyles} from '../src/modules/word-bands.js'
 
+test('同一修订保留多个字符格式，并在超链接内产生原生修订范围',async()=>{
+  const revision={type:'wordRevision',attrs:{id:'import-82',kind:'del',author:'作者'}}
+  const link={type:'link',attrs:{href:'https://example.org/'}}
+  const doc={type:'doc',content:[{type:'paragraph',content:[
+    {type:'text',text:'甲',marks:[link,revision]},{type:'text',text:'乙',marks:[link,{type:'bold'},revision]},
+  ]}]}
+  const zip=await JSZip.loadAsync(await writeDocx({doc,trackChanges:true}),{base64:true})
+  const body=await zip.file('word/document.xml').async('string')
+  assert.equal((body.match(/<w:del /g)||[]).length,1)
+  assert.match(body,/<w:hyperlink[^>]*><w:del w:id="82"[^>]*>.*?<w:delText[^>]*>甲<.*?<w:b\/>.*?<w:delText[^>]*>乙<.*?<\/w:del><\/w:hyperlink>/s)
+})
+
 test('正文批注跨字符格式定位，同段重叠批注保存成独立原生锚点',async()=>{
   const mark=id=>({type:'wordComment',attrs:{id,text:'批注 '+id,author:'审阅人',date:'2026-11-26T10:00:00Z'}})
   const doc={type:'doc',content:[{type:'paragraph',content:[

@@ -8,9 +8,10 @@ export const MarkdownFile = createContext<string | undefined>(undefined)
 const raster = /^image\/(?:png|jpeg|gif|webp|bmp|x-icon|vnd\.microsoft\.icon)$/iu
 export const relativeReference = (ref: string) => !!ref && !/^(?:[a-z][a-z\d+.-]*:|[/\\]{2}|#)/iu.test(ref)
 
-function MarkdownImageView({node}: NodeViewProps) {
+function MarkdownImageView({node,decorations}: NodeViewProps) {
   const disk = useContext(MarkdownFile)
-  const src = String(node.attrs.src || '')
+  const resolvedRef = decorations.find(d=>d.spec.picture)?.spec
+  const src = String(resolvedRef?.picture || node.attrs.src || '')
   const local = relativeReference(src)
   const [resource,setResource] = useState<{ref:string; url?:string; error?:string}>()
   useEffect(() => {
@@ -30,7 +31,7 @@ function MarkdownImageView({node}: NodeViewProps) {
   const resolved = local ? resource?.ref === src && resource.url : /^(https?:|data:image\/)/iu.test(src) && src
   const failed = local && resource?.ref === src && resource.error
   return <NodeViewWrapper as="span" className="md-image" contentEditable={false}>
-    {resolved ? <img src={resolved} loading="lazy" draggable={false} alt={node.attrs.alt || ''} title={node.attrs.title || undefined}/> :
+    {resolved ? <img src={resolved} loading="lazy" draggable={false} alt={node.attrs.alt || ''} title={resolvedRef?.caption || node.attrs.title || undefined}/> :
       <span className="md-image-missing" role={failed ? 'img' : 'status'} title={String(failed || src)}
         aria-label={failed ? '图片未能加载：' + src : undefined}>{node.attrs.alt || src || '图片'}</span>}
   </NodeViewWrapper>
@@ -47,15 +48,28 @@ function imageData(file: File) {
 
 export function markdownImages(active: () => boolean, report: (message:string) => void) {
   return Image.extend({
+    addAttributes() {
+      return {...this.parent?.(),referenceForm:{default:null,rendered:false},referenceLabel:{default:'',rendered:false}}
+    },
+    parseMarkdown(t,h) {
+      return h.createNode('image',{src:t.href || '',alt:t.text || '',title:t.title,referenceForm:t.referenceForm || null,referenceLabel:t.label || ''})
+    },
     renderMarkdown(node) {
       const {src='',alt='',title=''} = node.attrs || {}
+      const form = node.attrs?.referenceForm
+      if (form) return '!['+alt+']'+(form==='shortcut'?'':'['+node.attrs?.referenceLabel+']')
       const label=String(alt || '').replace(/[\\[\]]/gu,'\\$&')
       const url=String(src || '')
       const destination=/[\s()<>]/u.test(url) ? '<'+url.replace(/[<>]/gu,c=>encodeURIComponent(c))+'>' : url
       const caption=title ? ' "'+String(title).replace(/["\\]/gu,'\\$&')+'"' : ''
       return '!['+label+']('+destination+caption+')'
     },
-    addNodeView() { return ReactNodeViewRenderer(MarkdownImageView,{as:'span'}) },
+    addNodeView() { return ReactNodeViewRenderer(MarkdownImageView,{as:'span',update(props) {
+      const before = props.oldDecorations.find(d=>d.spec.picture)?.spec
+      const next = props.newDecorations.find(d=>d.spec.picture)?.spec
+      if (props.oldNode!==props.newNode || before?.picture!==next?.picture || before?.caption!==next?.caption) props.updateProps()
+      return true
+    }}) },
     addProseMirrorPlugins() {
       const editor = this.editor
       const insert = (files:FileList | undefined, from:number, to=from) => {

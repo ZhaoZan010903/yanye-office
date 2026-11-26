@@ -66,9 +66,13 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
       } else {
         const data = await readOfficeFile(file, chooseEncoding)
         if (!data) return false
+        if(data.content?.preserved) {
+          await api.pinWorkbookBase(file.id,file.revision)
+          data.content.preserved.base={id:file.id,revision:file.revision,extension:file.extension}
+        }
         if (data.markdown?.length > MAX_MARKDOWN_LENGTH) throw new Error('Markdown 文件超过单页字符上限。')
         const page = existing ?? makePage({ title, kind: type.kind })
-        const fields = { ...data, title, disk: binding(file, ['docx','xlsx','pptx'].includes(file.extension)) }
+        const fields = { ...data, title, disk: binding(file, ['docx','xlsx','xlsm','pptx'].includes(file.extension)) }
         const ok = change(current => {
           if (!existing) return addPage(releaseOtherBindings(current,page.id,file.id), { ...page, ...fields })
           const now = current.pages.find(p=>p.id===page.id)
@@ -161,7 +165,7 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
         if (alternateMapping && !asNew) {
           throw Object.assign(new Error('原件含同字异码的历史字节序列。重新编码会改变原字节。'),{code:'TEXT_UNENCODABLE'})
         }
-        content=await writeOfficeFile(page)
+        content=await writeOfficeFile(page,page.content?.preserved?.base ? api.readWorkbookBase : api.readOfficeSource)
       } catch (error) {
         if (extension!=='txt' || error.code!=='TEXT_UNENCODABLE') throw error
         if (!await offerUtf8Copy(error.message)) return false

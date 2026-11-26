@@ -1,18 +1,17 @@
 import type { Editor } from '@tiptap/core'
 import { DOMSerializer } from '@tiptap/pm/model'
 import { EditorView as SourceView } from '@codemirror/view'
-import { undo, redo } from '@codemirror/commands'
+import { undo, redo, undoDepth, redoDepth } from '@codemirror/commands'
 
 export type Choice = { label: string, action?: () => unknown, keys?: string, items?: Choice[], disabled?: boolean }
 
 export const copy = (value: string) => navigator.clipboard.writeText(value)
 
-export function selectionCommands(e: Editor, source: boolean, target: Element, textInput: HTMLTextAreaElement | null) {
+export function selectionCommands(e: Editor, source: boolean, target: Element) {
   const cm = source && target.closest('.cm-editor') ? SourceView.findFromDOM(target as HTMLElement) : null
   const sel = e.state.selection
   function selectedText() {
     if (source) {
-      if (textInput) return textInput.value.slice(textInput.selectionStart,textInput.selectionEnd)
       if (cm) return cm.state.sliceDoc(cm.state.selection.main.from,cm.state.selection.main.to)
       return ''
     }
@@ -29,10 +28,8 @@ export function selectionCommands(e: Editor, source: boolean, target: Element, t
     return wrap.innerHTML
   }
   function pasteText(text: string) {
-    if (textInput && source) {
-      textInput.focus()
-      document.execCommand(text ? 'insertText' : 'delete',false,text)
-    } else if (cm && source) {
+    if (source) {
+      if (!cm) return
       cm.focus(); cm.dispatch(cm.state.replaceSelection(text))
     } else {
       e.view.focus()
@@ -40,7 +37,7 @@ export function selectionCommands(e: Editor, source: boolean, target: Element, t
       else e.commands.deleteSelection()
     }
   }
-  const hasSelection = source ? Boolean(textInput ? textInput.selectionStart !== textInput.selectionEnd : cm && !cm.state.selection.main.empty) : !sel.empty
+  const hasSelection = source ? Boolean(cm && !cm.state.selection.main.empty) : !sel.empty
   async function copySelection() {
     if (source || typeof ClipboardItem === 'undefined') return copy(selectedText())
     const html = htmlSelection(), plain = selectedText()
@@ -51,13 +48,8 @@ export function selectionCommands(e: Editor, source: boolean, target: Element, t
   }
   async function cutSelection() {
     const originalState = cm?.state ?? e.state
-    const start = textInput?.selectionStart
-    const end = textInput?.selectionEnd
-    const value = textInput?.value
     await copySelection()
-    if (source && textInput) {
-      if (start !== textInput.selectionStart || end !== textInput.selectionEnd || value !== textInput.value) return
-    } else if ((cm?.state ?? e.state) !== originalState) return
+    if ((cm?.state ?? e.state) !== originalState) return
     pasteText('')
   }
   async function pasteClipboard() {
@@ -85,8 +77,8 @@ export function selectionCommands(e: Editor, source: boolean, target: Element, t
     {label:'粘贴', keys:'Ctrl+V', action:pasteClipboard},
   ]
   const choices: Choice[] = [
-    {label:'撤销', keys:'Ctrl+Z', disabled:!source && !e.can().undo(), action:()=>source ? cm ? undo(cm) : document.execCommand('undo') : e.commands.undo()},
-    {label:'重做', keys:'Ctrl+Y', disabled:!source && !e.can().redo(), action:()=>source ? cm ? redo(cm) : document.execCommand('redo') : e.commands.redo()},
+    {label:'撤销', keys:'Ctrl+Z', disabled:source ? !cm || !undoDepth(cm.state) : !e.can().undo(), action:()=>source ? cm && undo(cm) : e.commands.undo()},
+    {label:'重做', keys:'Ctrl+Y', disabled:source ? !cm || !redoDepth(cm.state) : !e.can().redo(), action:()=>source ? cm && redo(cm) : e.commands.redo()},
     ...clipboard,
   ]
   if (!source) choices.push({label:'复制／粘贴为', items:[
@@ -95,6 +87,6 @@ export function selectionCommands(e: Editor, source: boolean, target: Element, t
       {label:'复制为纯文本',disabled:!hasSelection,action:()=>copy(selectedText())},
       {label:'粘贴为纯文本',action:async()=>pasteText(await navigator.clipboard.readText())},
     ]})
-  const selectAll: Choice = {label:'全选',keys:'Ctrl+A',action:()=>source ? cm ? cm.dispatch({selection:{anchor:0,head:cm.state.doc.length}}) : textInput?.select() : e.commands.selectAll()}
+  const selectAll: Choice = {label:'全选',keys:'Ctrl+A',action:()=>source ? cm?.dispatch({selection:{anchor:0,head:cm.state.doc.length}}) : e.commands.selectAll()}
   return {choices,selectAll}
 }

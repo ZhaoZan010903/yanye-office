@@ -13,7 +13,7 @@ import {
   ArrowDownToLine, BookOpen, Bold, Check, ChevronRight, CircleAlert, CodeXml, Columns3, FilePlus2, Italic, List,
   ListTree, LoaderCircle, MoreHorizontal, PanelRightClose, PanelRightOpen, Plus, Redo2, Star, Undo2, X,
 } from 'lucide-react'
-import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, pageTitle } from '../shared/workspace.mjs'
+import { MAX_TITLE_LENGTH, pageTitle } from '../shared/workspace.mjs'
 import { blocks, BlockChoices, runBlock, slashBlocks } from './blocks.jsx'
 import { describeDocument, describeSource, preferDiskSource } from './markdown.js'
 import MarkdownFind from './MarkdownFind.jsx'
@@ -21,14 +21,15 @@ import { MarkdownFence } from './MarkdownFence'
 import MarkdownFenceCompletion from './MarkdownFenceCompletion'
 import { MarkdownFile, markdownImages, relativeReference } from './MarkdownImages'
 import { MarkdownInlineMath } from './MarkdownInlineMath'
+import { markdownReferences } from './markdown-references'
 import { openReading, writeReading } from './markdown-projection'
 import MarkdownContextTools from './menus/MarkdownContextTools.tsx'
-import { editSource, editorSource } from './markdown-search.js'
+import { editorSource } from './markdown-search.js'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
 import './modules/writing-tools.css'
 
 const MarkdownFigures=lazy(()=>import('./MarkdownFigures.jsx'))
-const LargeMarkdownSource=lazy(()=>import('./LargeMarkdownSource.jsx'))
+const MarkdownSource=lazy(()=>import('./MarkdownSource.jsx'))
 const focusBlock = active => Extension.create({
   name:'writingFocus',
   addProseMirrorPlugins() {
@@ -107,6 +108,7 @@ function Toolbar({ editor, format, mode, setMode, contextOpen, onContextToggle, 
 
   return <div className="editor-toolbar">
     <div className="format-controls" ref={controls} aria-label="编辑工具">
+      {mode==='read' && <>
       <div className="tool-group history-tools">
         <IconButton icon={Undo2} label="撤销" disabled={disabled || !format?.undo} onClick={run('undo')} />
         <IconButton icon={Redo2} label="重做" disabled={disabled || !format?.redo} onClick={run('redo')} />
@@ -128,6 +130,7 @@ function Toolbar({ editor, format, mode, setMode, contextOpen, onContextToggle, 
           setPopup(''); runBlock(editor, item, onCreateChild)
         }} /></div>}
       </div>
+      </>}
       {isTable && <div className="menu-anchor">
         <IconButton icon={Columns3} label="表格操作" aria-expanded={popup === 'table'} onClick={() => setPopup(popup === 'table' ? '' : 'table')} />
         {popup === 'table' && <div className="toolbar-menu block-choices table-menu">
@@ -175,6 +178,8 @@ export function DocumentEditor({
   const [largeDiskFile]=useState(()=>preferDiskSource(page))
   const [initialSource] = useState(() => largeDiskFile ? {headings:[],characters:0,completed:0,total:0,sourceOnly:false} : describeSource(page.markdown))
   const [mode, setMode] = useState(() => largeDiskFile ? 'source' : 'read')
+  const [sourceOpened, setSourceOpened] = useState(largeDiskFile)
+  const [cursor, setCursor] = useState({line:1,column:1})
   const parsedSource=useRef({raw:largeDiskFile?null:page.markdown,info:initialSource})
   const [largeOutline,setLargeOutline]=useState(initialSource)
   useEffect(()=>{
@@ -199,6 +204,7 @@ export function DocumentEditor({
   const focusRef=useRef(false), scrollRef=useRef(null), rootRef=useRef(null)
   const titleInput = useRef(null)
   const sourceInput = useRef(null)
+  const sourceFocus = useRef(false)
   const sourceSelection=useRef(null)
   const lastRichText = useRef(null)
   const projection = useRef(null)
@@ -237,6 +243,7 @@ export function DocumentEditor({
       StarterKit.configure({ codeBlock: false, trailingNode: false, underline: false, link: { openOnClick: false, HTMLAttributes: { title: 'Ctrl + 单击打开链接' } } }),
       MarkdownFence,
       MarkdownInlineMath,
+      ...markdownReferences(),
       TaskList,
       TaskItem.configure({ nested: true, a11y: { checkboxLabel: node => `待办 ${node.textContent || '空白条目'}` } }),
       TableKit,
@@ -348,11 +355,10 @@ export function DocumentEditor({
     if(next===mode) return
     if (next==='read' && !editor) return
     if (mode==='source' && sourceInput.current) {
-      const text=sourceInput.current
-      sourceSelection.current=text.selectedSource ? text.selectedSource() :
-        {start:text.selectionStart,end:text.selectionEnd,direction:text.selectionDirection,scroll:text.scrollTop}
+      sourceSelection.current=sourceInput.current.selectedSource()
     }
     setSelectedHeading(null)
+    if (next === 'source') { sourceFocus.current = true; setSourceOpened(true) }
     setMode(next)
   }
 
@@ -360,12 +366,7 @@ export function DocumentEditor({
     const input=sourceInput.current, previous=sourceSelection.current
     if (mode!=='source' || !input || !previous) return
     const {start,end,direction,scroll}=previous
-    if(input.selectSource) input.selectSource(start,end,direction,scroll)
-    else {
-      input.focus({preventScroll:true})
-      input.setSelectionRange(start,end,direction)
-      input.scrollTop=scroll
-    }
+    input.selectSource(start,end,direction,scroll)
   },[mode])
 
   function jumpTo(heading) {
@@ -373,11 +374,7 @@ export function DocumentEditor({
     if (mode === 'source') {
       const input = sourceInput.current
       if (!input) return
-      if(input.selectSource) {input.selectSource(heading.position,heading.position);return}
-      input.focus()
-      input.setSelectionRange(heading.position, heading.position)
-      const lineHeight = parseFloat(getComputedStyle(input).lineHeight)
-      input.scrollTop = Math.max(0, (heading.line - 2) * lineHeight)
+      input.selectSource(heading.position,heading.position)
     } else {
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       editor?.view.nodeDOM(heading.position)?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' })
@@ -398,7 +395,7 @@ export function DocumentEditor({
       replacing={find==='replace'} close={closeFind}/>}
     {figures && <Suspense fallback={<p role="status">正在打开预览…</p>}><MarkdownFigures markdown={page.markdown} close={()=>setFigures(false)}/></Suspense>}
     <div className={`editor-layout ${contextOpen ? 'with-context' : ''}`}>
-      <div className="document-scroll" ref={scrollRef}>
+      <div className={'document-scroll'+(mode==='source'?' md-source-mode':'')} ref={scrollRef}>
         <div className="document-sheet">
           <div className={`page-mark page-mark-${page.kind}`}><PageIcon page={page} size={25} /></div>
           <input ref={titleInput} spellCheck={false} className="document-title" aria-label="页面标题" value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
@@ -411,12 +408,11 @@ export function DocumentEditor({
             }} />
           <div className="document-rule" aria-hidden="true" />
           <div hidden={mode !== 'read'}><MarkdownFile.Provider value={page.disk?.id}><EditorContent editor={editor} /></MarkdownFile.Provider></div>
-          {(mode === 'source' || largeDiskFile) && <div className="source-editor" hidden={mode!=='source'}>
-            {largeDiskFile && <p className="source-note"><CodeXml size={15}/>大文档已打开源码。切换到阅读可在排版后的正文中编辑。</p>}
-            {largeDiskFile ? <Suspense fallback={<p role="status">正在打开源码…</p>}>
-              <LargeMarkdownSource ref={sourceInput} markdown={page.markdown} onChange={onChange} visible={mode==='source'}/>
-            </Suspense> : <textarea ref={sourceInput} aria-label="Markdown 源码" value={editorSource(page.markdown)} maxLength={MAX_MARKDOWN_LENGTH}
-              spellCheck={false} placeholder="在这里编写 Markdown…" onChange={event => onChange({ markdown:editSource(page.markdown,event.target.value) })} />}
+          {sourceOpened && <div className="source-editor" hidden={mode!=='source'}>
+            <Suspense fallback={<p role="status">正在打开源码…</p>}>
+              <MarkdownSource ref={sourceInput} markdown={page.markdown} onChange={onChange} onCursor={setCursor}
+                focusOnShow={sourceFocus.current} visible={mode==='source'}/>
+            </Suspense>
           </div>}
         </div>
       </div>
@@ -425,7 +421,7 @@ export function DocumentEditor({
     </div>
     <footer className="status-bar">
       <SaveState state={saveState} onSave={onSave} />
-      <div className="status-details"><span>{info.characters.toLocaleString('zh-CN')} 字符</span><span className="status-separator" />
+      <div className="status-details">{mode==='source' && <span>行 {cursor.line}，列 {cursor.column}</span>}<span>{info.characters.toLocaleString('zh-CN')} 字符</span><span className="status-separator" />
         <span>{mode === 'source' ? 'Markdown 源码' : page.disk ? 'Markdown 阅读' : '电子文档 · 仅本机'}</span></div>
     </footer>
   </section>

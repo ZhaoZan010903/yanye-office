@@ -58,6 +58,8 @@ async function createDesktop() {
       markdownLink: (id: string, ref: string) => command('library:markdownLink', id, ref),
       readPdf: (id: string, revision: string) => readBytes('readPdf', id, revision),
       readOfficeSource: (id: string, revision: string) => readBytes('readOfficeSource', id, revision),
+      pinWorkbookBase: (id: string, revision: string) => command('library:pinWorkbookBase',id,revision),
+      readWorkbookBase: (id: string, revision: string) => readBytes('readWorkbookBase',id,revision),
       copyPdf: (id: string, revision: string, bytes?: Uint8Array, purpose?: string) => copyFile('copyPdf', id, revision, bytes, purpose),
       saveOfficeCopy: (id: string, revision: string, bytes: Uint8Array) => copyFile('saveOfficeCopy', id, revision, bytes),
     },

@@ -2,15 +2,17 @@
 
 砚页是一款面向 Windows 的开源本地办公软件。名字取自砚台与书页。你可以在同一棵页面树里写 Markdown、算预算、排项目进度、画流程，再把文档大纲整理成演示文稿。
 
-**0.6.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+**0.7.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
 
 ![砚页文件中心的新建入口、最近文件与本地目录](docs/files.png)
 
-新版支持按原件替换 DOCX、XLSX、PPTX 文字、编辑 Word 页码域、创建 Excel 原生彩色图表、整理与批注 PDF，以及 PPTX 定时换页。打开文件中心即可开始。[本地办公功能、REA 样本与回读验证](docs/LOCAL_OFFICE.md)
+在 Word 文档中可以把正文设为纵向、附表设为横向，逐条接受或拒绝文字修订。在电子表格中可以创建原生数据透视表，打开 XLSM 查看可读的 VBA 模块并保留宏工程。演示稿支持为对象安排动画、设置触发顺序和运动路径。[本地办公功能、REA 样本与原应用回读](docs/LOCAL_OFFICE.md)
 
 Markdown 的「阅读」和「源码」均可编辑。在「阅读」中直接修改排版后的文稿，在「源码」中修改原始标记。输入三个反引号与语言名后按 Enter 创建围栏，选择 Java 可高亮，选择 Mermaid 可在图形和图源之间切换。磁盘 Markdown 达到 256 KiB 时优先打开源码。
 
 ![Windows 发行版中的 Markdown 阅读视图，含 Java 高亮和可编辑的 Mermaid 流程图](docs/markdown-windows.png)
+
+0.7 支持脚注往返、引用式链接与图片，以及 `flow`、`sequence` 两类图形围栏。源码视图可直接编辑整页 Markdown，提供标题层级、语法着色、软换行、行号与光标位置。[查看源码视图](docs/markdown-source-windows.png) · [查看文件样本和兼容说明](docs/LOCAL_OFFICE.md)
 
 ## 产品设计
 
@@ -86,6 +88,7 @@ pnpm test:desktop
 | 0.4 · 断网文稿与文件阅读 | 电子文档增量保存、异常退出恢复、旧工作区迁移、PDF 阅读、TXT 编辑及 Word / Excel 排版增强 |
 | 0.5 · 本地格式编辑 | 原版式文字替换、页眉页脚和域、原生图表与规则、形状与放映切换、PDF 页面整理与批注、Markdown 和文本工具 |
 | 0.6 · 本地编辑体验 | Tauri 与 Rust 宿主、两种可编辑 Markdown 视图、语言围栏、上下文菜单与 Office 功能区 |
+| 0.7 · Markdown 与办公格式 | 脚注和引用、流程与时序图、整页源码、Word 分节和文字修订、Excel 透视表与宏原件保留、演示对象动画 |
 | 后续本地里程碑 | 分块按需读入、附件与大库索引、文稿引用、深度排版、专业图形与更多格式互操作 |
 | 最后 · 团队文档协作 | 全部本地里程碑完成后，再开发账号、共享权限、评论、多人同步与冲突处理 |
 

@@ -19,8 +19,8 @@ function parse(xml,open,close,text) {
 
 // ExcelJS expands every address in a validation sqref. Keep native rectangles compact,
 // including full-column rules produced by Excel and WPS.
-export async function nativeRules(bytes) {
-  const zip=await JSZip.loadAsync(bytes)
+export async function nativeRules(bytes, archive) {
+  const zip=archive || await JSZip.loadAsync(bytes)
   const xml=async path=>await zip.file(path)?.async('string')??''
   const paths=new Map(), sheets=[]
   parse(await xml('xl/_rels/workbook.xml.rels'),node=>{
@@ -96,7 +96,7 @@ export async function nativeRules(bytes) {
 }
 
 export async function writeNativeRules(bytes,sheets,display) {
-  if (!sheets.some(s=>s.chart || s.validations?.length || Object.keys(s.autoFilter?.columns??{}).length)) return bytes
+  if (!sheets.some(s=>s.pivot || s.chart || s.validations?.length || Object.keys(s.autoFilter?.columns??{}).length)) return bytes
   const zip=await JSZip.loadAsync(bytes)
   for (const [index,sheet] of sheets.entries()) {
     const path='xl/worksheets/sheet'+(index+1)+'.xml'
@@ -116,6 +116,10 @@ export async function writeNativeRules(bytes,sheets,display) {
     }
     zip.file(path,xml)
     if(sheet.chart) await addChart(zip,sheet,index,display)
+  }
+  if(sheets.some(s=>s.pivot)) {
+    const {writePivotParts}=await import('./sheet-pivot-xml.js')
+    await writePivotParts(zip,{sheets})
   }
   return zip.generateAsync({type:'uint8array',compression:'DEFLATE'})
 }

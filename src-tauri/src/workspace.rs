@@ -66,7 +66,7 @@ fn validate_page(p: &Value, schema: u64) -> Result<()> {
                 && disk["dirty"].is_boolean()
                 && matches!(
                     disk["extension"].as_str(),
-                    Some("docx" | "xlsx" | "pptx" | "md" | "pdf" | "txt")
+                    Some("docx" | "xlsx" | "xlsm" | "pptx" | "md" | "pdf" | "txt")
                 ),
             "文件绑定无效。"
         );
@@ -440,6 +440,15 @@ impl Workspace {
         serde_json::from_str::<Value>(&raw)?["revision"]
             .as_u64()
             .context("工作区缺少修订号。")
+    }
+    pub fn workbook_bases(&self) -> HashSet<String> {
+        self.pages
+            .values()
+            .filter_map(|page| {
+                let base = &page.data["content"]["preserved"]["base"];
+                crate::files::workbook_base_name(base["id"].as_str()?, base["revision"].as_str()?)
+            })
+            .collect()
     }
     pub fn dirty(&self) -> Result<Vec<String>> {
         let mut out = Vec::new();

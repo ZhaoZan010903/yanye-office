@@ -1,12 +1,8 @@
+import { desktopSession, eventually } from './desktop-session.mjs'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { setTimeout as delay } from 'node:timers/promises'
-import { chromium } from 'playwright'
 import { WorkspaceDatabase } from './fixtures/v05/workspace-database.mjs'
 import { updatePage } from '../shared/workspace.mjs'
 import { workspaceDelta } from '../shared/workspace-delta.mjs'
@@ -40,55 +36,12 @@ for (const markdown of ['甲\0😀', '甲\0😁']) {
 }
 legacy.close()
 
-async function eventually(fn, label, timeout = 30_000) {
-  const end = Date.now() + timeout
-  let failure
-  while (Date.now() < end) {
-    try { const result = await fn(); if (result) return result } catch (err) { failure = err }
-    await delay(120)
-  }
-  throw new Error(label, { cause: failure })
-}
-
-let processUnderTest, browser, activePage
-async function start() {
-  const portProbe = createServer()
-  portProbe.listen(0, '127.0.0.1')
-  await once(portProbe, 'listening')
-  const port = portProbe.address().port
-  portProbe.close()
-  await once(portProbe, 'close')
-  processUnderTest = spawn(executable, [source], { windowsHide: true, env: {
-    ...process.env, YANYE_PROFILE: profile, WEBVIEW2_USER_DATA_FOLDER: join(temp, 'webview'),
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=' + port,
-  } })
-  const ws = await eventually(async () => {
-    if (processUnderTest.exitCode !== null) throw Error('砚页提前退出。')
-    return (await (await fetch('http://127.0.0.1:' + port + '/json/version')).json()).webSocketDebuggerUrl
-  }, '未能连接测试窗口。')
-  browser = await chromium.connectOverCDP(ws)
-  const page = await eventually(() => browser.contexts()[0]?.pages()[0], '未找到砚页 WebView。')
-  activePage = page
-  page.on('pageerror', error => console.error('WebView error', error.stack))
-  page.on('console', msg => { if (msg.type() === 'error') console.error('WebView console', msg.text().slice(0, 320)) })
-  page.setDefaultTimeout(20_000)
-  try { await page.getByRole('button', { name: '源码', exact: true }).waitFor() }
-  catch (error) { console.error('页面内容', (await page.locator('body').innerText()).slice(0, 900)); throw error }
-  return page
-}
-
-async function stop() {
-  if (processUnderTest?.exitCode === null && !processUnderTest.killed) {
-    const exited = once(processUnderTest, 'exit')
-    processUnderTest.kill()
-    await exited
-  }
-  await browser?.close().catch(() => {})
-  browser = undefined
-}
+const { start, stop } = desktopSession({executable,source,profile,temp})
+let activePage
 
 try {
-  let page = await start()
+  let page = activePage = await start()
+  await page.getByRole('button', {name:'源码',exact:true}).waitFor()
   assert.equal(await page.locator('.mode-switch button').count(), 2)
   await page.locator('[data-language="java"] .hljs-keyword').first().waitFor()
   await page.locator('[data-language="mermaid"] img').first().waitFor()
@@ -105,15 +58,17 @@ try {
   await page.getByRole('button', { name: '源码', exact: true }).click()
   const text = () => page.getByRole('textbox', { name: 'Markdown 源码' })
   const saved = fixture + '磁盘改动\r\n'
-  await text().fill(saved.replaceAll('\r\n', '\n'))
+  await text().press('Control+End')
+  await page.keyboard.insertText('磁盘改动\n')
   await page.keyboard.press('Control+s')
   await eventually(async () => (await readFile(source, 'utf8')) === saved, 'Ctrl+S 未保留原换行写回文件。')
-  await text().fill((saved + '仅在草稿里').replaceAll('\r\n', '\n'))
+  await text().press('Control+End')
+  await page.keyboard.insertText('仅在草稿里')
   await page.evaluate(() => window.yanye.save())
   await stop()
-  page = await start()
+  page = activePage = await start()
   await page.getByRole('button', { name: '源码', exact: true }).click()
-  assert.match(await text().inputValue(), /仅在草稿里$/u)
+  assert.match(await text().innerText(), /仅在草稿里$/u)
   assert.equal(await readFile(source, 'utf8'), saved)
   console.log('Tauri/WebView2 通过旧数据库读取、资源管理器打开 Markdown、离线高亮与图形、CRLF 写回和异常退出草稿恢复。')
 } catch (error) {

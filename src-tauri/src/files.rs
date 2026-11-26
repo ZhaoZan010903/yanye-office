@@ -14,7 +14,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 const LIMIT: usize = 32 * 1024 * 1024;
-const OFFICE: &[&str] = &["docx", "xlsx", "pptx", "md", "txt", "pdf"];
+const OFFICE: &[&str] = &["docx", "xlsx", "xlsm", "pptx", "md", "txt", "pdf"];
 fn extension(path: &Path) -> String {
     path.extension()
         .and_then(|s| s.to_str())
@@ -117,6 +117,44 @@ fn staged(path: &Path, bytes: &[u8]) -> Result<NamedTempFile> {
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     staged(path, bytes)?.persist(path)?;
+    Ok(())
+}
+pub fn workbook_base_name(id: &str, revision: &str) -> Option<String> {
+    let id = Uuid::parse_str(id).ok()?;
+    (revision.len() == 64
+        && revision
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then(|| format!("{id}-{revision}.base"))
+}
+pub fn prune_workbook_bases(
+    profile: &Path,
+    keep: &std::collections::HashSet<String>,
+) -> Result<()> {
+    let dir = profile.join("workbook-sources");
+    if !dir.try_exists()? {
+        return Ok(());
+    }
+    check_existing(&dir)?;
+    for file in fs::read_dir(dir)? {
+        let file = file?;
+        let filename = file.file_name();
+        let Some(name) = filename.to_str() else {
+            continue;
+        };
+        let Some(stem) = name.strip_suffix(".base") else {
+            continue;
+        };
+        let Some((id, hash)) = stem.rsplit_once('-') else {
+            continue;
+        };
+        if workbook_base_name(id, hash).as_deref() == Some(name)
+            && !keep.contains(name)
+            && file.file_type()?.is_file()
+        {
+            fs::remove_file(file.path())?;
+        }
+    }
     Ok(())
 }
 fn exclusive(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -275,7 +313,7 @@ impl Library {
             && (!data.iter().take(1024).any(|b| *b == 0) || data.starts_with(&[239, 187, 191]));
         let content = match ext.as_str() {
             "pdf" => Value::Null,
-            "docx" | "xlsx" | "pptx" => STANDARD.encode(&data).into(),
+            "docx" | "xlsx" | "xlsm" | "pptx" => STANDARD.encode(&data).into(),
             "txt" if !utf8 => STANDARD.encode(&data).into(),
             _ => std::str::from_utf8(&data)
                 .context("无法解码 UTF-8 文本。")?
@@ -296,7 +334,7 @@ impl Library {
             if pdf {
                 ext == "pdf"
             } else {
-                matches!(ext.as_str(), "docx" | "xlsx" | "pptx")
+                matches!(ext.as_str(), "docx" | "xlsx" | "xlsm" | "pptx")
             },
             "原件格式无效。"
         );
@@ -314,7 +352,7 @@ impl Library {
         );
         let bytes = decode(
             v["content"].as_str().context("文件内容无效。")?,
-            matches!(ext, "docx" | "xlsx" | "pptx" | "txt"),
+            matches!(ext, "docx" | "xlsx" | "xlsm" | "pptx" | "txt"),
         )?;
         let id = v["id"].as_str();
         let bound = v["directory"].is_null() && v["asNew"] != true && id.is_some();
@@ -611,6 +649,28 @@ impl Library {
                     "所选格式与扩展名不匹配。"
                 );
                 self.open_path(&p)
+            }
+            "pinWorkbookBase" | "readWorkbookBase" => {
+                let (id, revision) = (str_arg(args, 0)?, str_arg(args, 1)?);
+                let filename = workbook_base_name(id, revision).context("工作簿原件修订无效。")?;
+                let dir = self.profile.join("workbook-sources");
+                let path = dir.join(filename);
+                if op == "pinWorkbookBase" {
+                    ensure!(
+                        matches!(extension(&self.known(id)?.path).as_str(), "xlsx" | "xlsm"),
+                        "需要已登记的工作簿。"
+                    );
+                    let bytes = self.original(id, revision, false)?;
+                    fs::create_dir_all(&dir)?;
+                    if !path.try_exists()? || digest(&checked_read(&path)?) != revision {
+                        atomic_write(&path, &bytes)?;
+                    }
+                    Ok(true.into())
+                } else {
+                    let bytes = checked_read(&path).context("工作簿原件快照不可用。")?;
+                    ensure!(digest(&bytes) == revision, "工作簿原件快照校验失败。");
+                    Ok(json!({"__bytes":STANDARD.encode(bytes)}))
+                }
             }
             "readPdf" | "readOfficeSource" => Ok(
                 json!({"__bytes":STANDARD.encode(self.original(str_arg(args,0)?,str_arg(args,1)?,op=="readPdf")?)}),

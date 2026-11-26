@@ -107,3 +107,38 @@ fn previous_file_binding_survives_restart_and_rejects_stale_save() {
     assert!(reopened.call("save", &[request]).is_err());
     assert_eq!(fs::read_to_string(path).unwrap(), "其他程序的更改");
 }
+
+#[test]
+fn workbook_baseline_survives_restart_and_external_change_for_save_as() {
+    let home = tempdir().unwrap();
+    let profile = home.path().join("profile");
+    fs::create_dir(&profile).unwrap();
+    let path = home.path().join("budget.xlsm");
+    fs::write(&path, "original").unwrap();
+    let id = "ca1cb69a-b2e5-4341-90f9-919afa565300";
+    let index = json!({"version":1,"root":home.path(),"files":[{"id":id,"path":path,"modifiedAt":"2026-01-01"}]});
+    fs::write(profile.join("file-library.json"), index.to_string()).unwrap();
+    let mut library = Library::open(&profile).unwrap();
+    let opened = library.call("readRecent", &[id.into()]).unwrap();
+    let args = [id.into(), opened["revision"].clone()];
+    library.call("pinWorkbookBase", &args).unwrap();
+    drop(library);
+    fs::write(&path, "external edit").unwrap();
+    let mut reopened = Library::open(&profile).unwrap();
+    assert_eq!(
+        reopened.call("readWorkbookBase", &args).unwrap()["__bytes"],
+        "b3JpZ2luYWw="
+    );
+    let save = json!({"id":id,"revision":opened["revision"],"name":"budget.xlsm","extension":"xlsm","content":"bmV3"});
+    assert!(reopened.call("save", &[save]).is_err());
+    let save_copy = json!({"id":id,"asNew":true,"directory":"","revision":opened["revision"],"name":"draft-copy.xlsm","extension":"xlsm","content":"bmV3"});
+    reopened.call("save", &[save_copy]).unwrap();
+    assert_eq!(fs::read(home.path().join("draft-copy.xlsm")).unwrap(), b"new");
+    assert_eq!(fs::read_to_string(path).unwrap(), "external edit");
+    let name = crate::files::workbook_base_name(id, opened["revision"].as_str().unwrap()).unwrap();
+    crate::files::prune_workbook_bases(&profile, &[name.clone()].into()).unwrap();
+    let copy = profile.join("workbook-sources").join(name);
+    assert!(copy.exists());
+    crate::files::prune_workbook_bases(&profile, &Default::default()).unwrap();
+    assert!(!copy.exists());
+}

@@ -1,12 +1,14 @@
 import React, { forwardRef, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import { EditorSelection } from '@codemirror/state'
-import { EditorView, keymap, lineNumbers } from '@codemirror/view'
+import { EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { textModel, restoreLineEndings } from './modules/plain-text.js'
 import { txtEditorState, textAfterEdit } from './modules/txt-history.js'
 import { MAX_MARKDOWN_LENGTH } from '../shared/workspace.mjs'
+import { markdownSourceLanguage } from './markdown-source-language'
+import './markdown-source.css'
 
-const LargeMarkdownSource=forwardRef(function LargeMarkdownSource({ markdown, onChange, visible }, ref) {
+const MarkdownSource=forwardRef(function MarkdownSource({ markdown, onChange, visible, onCursor, focusOnShow }, ref) {
   const mount=useRef(null), view=useRef(null), accepted=useRef(markdown), send=useRef(onChange)
   const extensions=useRef(null), model=useRef(null)
   send.current=onChange
@@ -40,9 +42,20 @@ const LargeMarkdownSource=forwardRef(function LargeMarkdownSource({ markdown, on
     },
   }),[])
   useLayoutEffect(()=>{
-    extensions.current=[lineNumbers(),history(),EditorView.lineWrapping,keymap.of([...historyKeymap,...defaultKeymap]),
+    const landmarks = lineNumbers({
+      formatNumber(number, state) {
+        return number === 1 || number % 10 === 0 || number === state.doc.lines ? String(number) : ''
+      },
+    })
+    extensions.current=[markdownSourceLanguage,landmarks,highlightActiveLine(),highlightActiveLineGutter(),history(),EditorView.lineWrapping,
+      placeholder('开始编写 Markdown…'),keymap.of([...historyKeymap,...defaultKeymap]),
       EditorView.contentAttributes.of({'aria-label':'Markdown 源码',role:'textbox','aria-multiline':'true',spellcheck:'false'}),
       EditorView.updateListener.of(update=>{
+        if (update.docChanged || update.selectionSet) {
+          const head = update.state.selection.main.head
+          const line = update.state.doc.lineAt(head)
+          onCursor({line:line.number, column:head-line.from+1})
+        }
         if(!update.docChanged) return
         const nextModel=textAfterEdit(model.current,update)
         const next=nextModel.eol==='n' && nextModel.lineMap===undefined ? nextModel.text : restoreLineEndings(nextModel)
@@ -55,15 +68,19 @@ const LargeMarkdownSource=forwardRef(function LargeMarkdownSource({ markdown, on
     return ()=>{view.current.destroy();view.current=null}
   },[])
   useLayoutEffect(()=>{
-    if(markdown!==accepted.current) {
+    if(visible && markdown!==accepted.current) {
       const v=view.current
       // External reloads and edits made in rich mode establish a new undo base.
       accepted.current=markdown
       v.setState(createState(markdown))
+      onCursor({line:1,column:1})
     }
     if(visible) view.current.requestMeasure()
   },[markdown,visible])
-  return <div ref={mount} className="md-source-large"/>
+  useLayoutEffect(()=>{
+    if(visible && focusOnShow) view.current?.focus()
+  },[visible,focusOnShow])
+  return <div ref={mount} className="md-source-surface"/>
 })
 
-export default LargeMarkdownSource
+export default MarkdownSource

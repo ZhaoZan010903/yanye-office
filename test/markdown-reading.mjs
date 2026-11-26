@@ -1,9 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { chromium } from 'playwright'
-import { createServer } from 'vite'
+import { openMarkdownFixture } from './markdown-fixture.mjs'
 
 const fixture = '---\r\ntitle: 备忘\r\n---\r\n\r\n# 原稿 ###\n\n' +
   '~~~Java  title="demo"\r\npublic class Demo {}\r\n~~~\n\n' +
@@ -13,41 +9,14 @@ const fixture = '---\r\ntitle: 备忘\r\n---\r\n\r\n# 原稿 ###\n\n' +
   '| A | B |\n| --- | --- |\n| one | two |\n\n* 一\n* 二\n\n' +
   '配图 ![像素](assets/a.png) 和 [下一篇](next.md)。\n\n尾段\r\n'
 const pixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/ya8AAAAASUVORK5CYII='
-const harness = `
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import { DocumentEditor } from '/src/editor.jsx'
-import '/src/styles.css'
-function Harness() {
-  window.yanye={library:{markdownResource:async(id,ref)=>{window.resource=[id,ref];return {mime:'image/png',data:` + JSON.stringify(pixel) + `}}}}
-  const [page, setPage] = React.useState({id:'test',title:'样本',kind:'note',disk:{id:'local',extension:'md'},markdown:` + JSON.stringify(fixture) + `})
-  window.saved = page.markdown
-  return React.createElement(DocumentEditor, {page, children:[],saveState:{state:'saved'},
-    onChange: change => {setPage(old => ({...old,...change}));return true}, onExternalLink(){},onOpenFileLink(ref){window.link=ref} })
-}
-createRoot(document.querySelector('main')).render(React.createElement(Harness))
-`
-const cacheDir = await mkdtemp(join(tmpdir(), 'yanye-markdown-'))
-const server = await createServer({configFile:false, cacheDir, logLevel:'error',
-  optimizeDeps:{entries:['src/editor.jsx'],include:['react-dom/client']},server:{host:'127.0.0.1',port:0,watch:null},
-  plugins:[{name:'markdown-regression-fixture',resolveId(id){if(id === '/markdown-fixture.js')return id},
-    load(id){if(id==='/markdown-fixture.js')return harness},
-    configureServer(server){server.middlewares.use((req,res,next)=>{
-      if (req.url !== '/markdown-fixture') return next()
-      res.setHeader('Content-Type','text/html;charset=UTF-8');res.end('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><link rel="icon" href="data:,"><main></main><script type="module" src="/markdown-fixture.js"></script></html>')
-    })}}]})
-let browser, page
+const {page,url,close} = await openMarkdownFixture(fixture,pixel)
 try {
-  await server.listen()
-  browser = await chromium.launch({channel:process.env.MARKDOWN_BROWSER || 'msedge'})
-  page = await browser.newPage()
-  page.setDefaultTimeout(18000)
   const errors=[]
   page.on('pageerror',e=>{errors.push(String(e));console.error(e.message)})
   page.on('console',m=>{if(m.type()==='error')console.error(m.text())})
   const button = name => page.getByRole('button',{name,exact:true})
   const reading = page.getByRole('textbox',{name:'正文编辑器'})
-  await page.goto(server.resolvedUrls.local[0]+'markdown-fixture',{waitUntil:'commit'})
+  await page.goto(url,{waitUntil:'commit'})
   await reading.locator('h1').waitFor({timeout:120000})
   assert.equal(await page.locator('.mode-switch button').count(),2)
   assert.equal(await button('阅读').getAttribute('aria-pressed'),'true')
@@ -150,7 +119,5 @@ try {
     kind:el.dataset.sourceKind, text:el.innerText.slice(0,150), rendered:!!el.querySelector('.katex')}))))
   throw error
 } finally {
-  await browser?.close()
-  await server.close()
-  await rm(cacheDir,{recursive:true,force:true})
+  await close()
 }

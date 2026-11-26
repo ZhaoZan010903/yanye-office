@@ -223,7 +223,7 @@ export function assertWorkspace(workspace) {
         (Object.hasOwn(officeKinds, page.kind) && (workspace.schemaVersion < 2 || !page.content || typeof page.content !== 'object' || Array.isArray(page.content))) ||
         (page.kind === 'word' && workspace.schemaVersion < 3) ||
         (page.disk != null && (workspace.schemaVersion < 3 || typeof page.disk.id !== 'string' ||
-          typeof page.disk.name !== 'string' || !['docx','xlsx','pptx','md','pdf','txt'].includes(page.disk.extension) ||
+          typeof page.disk.name !== 'string' || !['docx','xlsx','xlsm','pptx','md','pdf','txt'].includes(page.disk.extension) ||
           typeof page.disk.revision !== 'string' || typeof page.disk.dirty !== 'boolean')) ||
         typeof page.createdAt !== 'string' || typeof page.updatedAt !== 'string' ||
         !(page.deletedAt === null || typeof page.deletedAt === 'string')) {

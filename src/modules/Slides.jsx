@@ -5,6 +5,9 @@ import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, ImagePlus, Move, PanelTo
 import { moveSlide, newSlide, readDeck, shapeKinds, slideBoxes, slideLayouts, slideShape, slidesFromDocument, slideThemes, textBox } from './slides-model.js'
 import { ShapeProperties, SlideShape } from './SlideShapes.jsx'
 import { slideTransition, speedNames, transitionNames } from './slide-transition.js'
+import {AnimatedPage,AnimationPanel} from './SlideAnimations.jsx'
+import {slideTargets} from './slide-animations.js'
+import './slide-animation.css'
 import './slides.css'
 
 function positioned({ x, y, w, h }) {
@@ -17,7 +20,7 @@ function FreeText({ box, index, selected, select, update }) {
   const position = preview || box
   const style = { ...positioned(position), color:'#' + box.color, fontSize:box.fontSize / 9.6 + 'cqw',
     fontFamily:box.fontFace, fontStyle:box.italic?'italic':undefined, fontWeight:box.bold?700:400, textAlign:box.align }
-  if (!update) return <div className="slides-text" style={style}>{box.text}</div>
+  if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}>{box.text}</div>
   function dragPosition(e) {
     const start = drag.current
     return textBox({ ...box, x: start.x + (e.clientX - start.clientX) / start.width,
@@ -52,7 +55,7 @@ function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit,
         fontStyle:slide.titleBox.italic?'italic':undefined,textAlign:slide.titleBox.align,
       } : positioned(box)
       if (field === 'side' && slide.layout === 'image') {
-        return <div key="image" className="slides-image-box" style={style}>
+        return <div key="image" data-animation-target="image" className="slides-image-box" style={style}>
           {slide.image ? <img src={slide.image.data} alt={slide.image.name || '幻灯片插图'} /> :
             edit && <button type="button" onClick={onImage}><ImagePlus size={20} />插入本机图片</button>}
         </div>
@@ -60,7 +63,7 @@ function SlidePage({ slide, theme, edit, onImage, boxId, onBoxSelect, onBoxEdit,
       const className = 'slides-text slides-' + field + (slide.layout === 'cover' ? ' cover' : '')
       return edit ? <textarea key={field} className={className} style={style} aria-label={fields[field]}
         placeholder={placeholders[field]} value={slide[field] || ''} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
-        <div key={field} className={className} style={style}>{slide[field]}</div>
+        <div key={field} data-animation-target={field} className={className} style={style}>{slide[field]}</div>
     })}
     {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId}
       onSelect={edit ? ()=>onShapeSelect(shape.id) : undefined} onMove={edit ? patch=>onShapeEdit(shape.id,patch) : undefined}/>)}
@@ -96,6 +99,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   function selectShape(id) { setShapeId(id);setBoxId(null) }
   const freeBoxes = selected.textBoxes || []
   const currentBox = freeBoxes.find(box => box.id === boxId)
+  const playback=useRef(null)
   const root = useRef(null)
   const imageInput = useRef(null)
   const latest = useRef(deck)
@@ -126,7 +130,16 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   }
   function changeSlide(id, patch) {
     const current = latest.current
-    return save({ ...current, slides: current.slides.map(s => s.id === id ? { ...s, ...patch } : s) })
+    const before=current.slides.find(s=>s.id===id), next={...before,...patch}
+    if (next.animations?.length && (patch.shapes || patch.textBoxes || patch.layout)) {
+      const valid=new Set(slideTargets(next).map(([target])=>target))
+      const kept=next.animations.filter(effect=>valid.has(effect.target))
+      if (kept.length!==next.animations.length && next.nativeTiming && !next.nativeTiming.editable) {
+        setError('此对象受复杂原始时间线引用，请先保留原件。');return false
+      }
+      next.animations=kept
+    }
+    return save({ ...current, slides: current.slides.map(s => s.id === id ? next : s) })
   }
   function editBox(id,patch) {
     changeSlide(selected.id,{textBoxes:freeBoxes.map(box => box.id === id ? textBox({...box,...patch}) : box)})
@@ -205,7 +218,10 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       if (e.key === 'Escape') endShow()
       else if (e.key === 'Home') target = 0
       else if (e.key === 'End') target = deck.slides.length - 1
-      else if (e.key in changes) target += changes[e.key]
+      else if (e.key in changes) {
+        if (changes[e.key]>0 && playback.current?.advance()) { e.preventDefault(); return }
+        target += changes[e.key]
+      }
       else return
       e.preventDefault()
       const slide = deck.slides[Math.min(deck.slides.length - 1, Math.max(0, target))]
@@ -260,7 +276,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   return <section ref={root} tabIndex={-1} className={'slides-editor' + (playing ? ' is-playing' : '')} aria-label="演示文稿编辑器">
     {playing ? <div className="slides-show">
       <div key={selected.id} className={'slides-projector transition-'+transition.effect} style={{'--fade-time':{fast:'.25s',med:'.6s',slow:'1s'}[transition.speed]}}
-        onClick={()=>{ if (transition.click && index+1<deck.slides.length) setActiveId(deck.slides[index+1].id) }}><SlidePage slide={selected} theme={theme} /></div>
+        onClick={()=>{ if(!playback.current?.advance() && transition.click && index+1<deck.slides.length) setActiveId(deck.slides[index+1].id) }}><AnimatedPage ref={playback} slide={selected}><SlidePage slide={selected} theme={theme}/></AnimatedPage></div>
       <div className="slides-show-bar">
         <button type="button" disabled={!index} onClick={() => setActiveId(deck.slides[index - 1].id)}>上一页</button>
         <span aria-live="polite">{index + 1} / {deck.slides.length}</span>
@@ -268,9 +284,10 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         <button type="button" onClick={endShow}>退出放映 <kbd>Esc</kbd></button>
       </div>
     </div> : <>
-      <Ribbon label="演示" tabs={['开始','插入','设计','切换','放映','文件']} active={tab}
+      <Ribbon label="演示" tabs={['开始','插入','设计','切换','动画','放映','文件']} active={tab}
         onChange={next=>{setTab(next);setPanel(next==='切换'?'transition':'')}}/>
-      {tab!=='切换' && <div className="slides-toolbar ribbon-panel">
+      {tab==='动画' && <AnimationPanel key={selected.id} slide={selected} onChange={animations=>changeSlide(selected.id,{animations})}/>}
+      {tab!=='切换' && tab!=='动画' && <div className="slides-toolbar ribbon-panel">
         {tab==='开始' && <RibbonGroup label="幻灯片">
         <button type="button" onClick={() => insert(false)}><Plus size={16} />新建幻灯片</button>
         <button type="button" onClick={()=>insert(true)}><Copy size={15}/>复制当前页</button>
@@ -343,7 +360,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         </select><button type="button" onClick={() => append(slidesFromDocument(pages.find(p => p.id === sourceId) || pages[0]))}>按标题生成并追加</button></> : <span>工作区还没有可用的文档。</span>}
         <IconAction icon={X} label="关闭文档大纲" onClick={() => setPanel('')} />
       </div>}
-      {panel === 'import' && <div className="slides-panel"><span>按原页序追加文本、常用形状、备注和每页首张 PNG / JPEG。导入采用本地版式，动画、组合及媒体会简化。</span>
+      {panel === 'import' && <div className="slides-panel"><span>按原页序追加文本、常用形状、备注和每页首张 PNG / JPEG。导入采用本地版式，可识别的对象动画会进入动画面板；组合及媒体会简化。</span>
         <button type="button" disabled={busy} onClick={importFile}>选择 PPTX 文件</button><IconAction icon={X} label="关闭导入" onClick={() => setPanel('')} /></div>}
       {error && <p className="slides-error" role="alert">{error}</p>}
       <div className="slides-layout">

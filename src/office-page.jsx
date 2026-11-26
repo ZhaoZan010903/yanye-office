@@ -5,6 +5,7 @@ import { IconButton, PageIcon } from './workspace-ui.jsx'
 import './office.css'
 
 const OriginalReplaceDialog = lazy(() => import('./original-replace-dialog.jsx'))
+const PreservedWorkbook = lazy(() => import('./modules/PreservedWorkbook.jsx'))
 const formats = {word:'docx', spreadsheet:'xlsx', presentation:'pptx', pdf:'pdf', txt:'txt'}
 
 const editors = {
@@ -65,7 +66,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
   useEffect(() => {
     if (focusTitle) { titleRef.current?.focus(); titleRef.current?.select() }
   }, [focusTitle])
-  const Editor = editors[page.kind]
+  const Editor = page.kind==='spreadsheet' && page.content?.preserved ? PreservedWorkbook : editors[page.kind]
   return <section className={'office-page type-'+(format || page.kind)} data-ribbon-hidden={collapsed} aria-label={officeKinds[page.kind]}>
     <header className="office-heading">
       <PageIcon page={page} size={24} />

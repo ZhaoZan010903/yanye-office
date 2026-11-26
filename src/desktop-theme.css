@@ -1,5 +1,5 @@
 .type-docx { --file-ink:#265b99; --file-tint:#eaf2fb; --file-fold:#bfd9f1; }
-.type-xlsx { --file-ink:#22704e; --file-tint:#e6f3eb; --file-fold:#b7dcc4; }
+.type-xlsx,.type-xlsm { --file-ink:#22704e; --file-tint:#e6f3eb; --file-fold:#b7dcc4; }
 .type-pptx { --file-ink:#a14d2e; --file-tint:#fbefe8; --file-fold:#edc5b3; }
 .type-pdf { --file-ink:#a13945; --file-tint:#fcECEE; --file-fold:#edbdc4; }
 .type-md { --file-ink:#654f87; --file-tint:#f1edf7; --file-fold:#d7cae6; }

@@ -4,6 +4,7 @@ import CodeBlock from '@tiptap/extension-code-block'
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { Check, CodeXml, Eye } from 'lucide-react'
 import { Figure } from './MarkdownFigures.jsx'
+import { fenceFigure } from './markdown-figures.js'
 import { languageSuggestions, loadLanguages } from './markdown-languages'
 import { fenceHighlighting } from './markdown-highlighting'
 
@@ -13,7 +14,7 @@ function FenceView({ node, updateAttributes, getPos, editor }: NodeViewProps) {
   const { language, sourceKind } = node.attrs
   const label = String(language || '')
   const kind = label.toLowerCase()
-  const figure = ['mermaid', 'meried'].includes(kind) ? 'mermaid' : ['math', 'latex'].includes(kind) ? 'math' : null
+  const figure = fenceFigure(kind)
   const [edit, setEdit] = useState(false)
   const [active, setActive] = useState(false)
   const [draft, setDraft] = useState(label)

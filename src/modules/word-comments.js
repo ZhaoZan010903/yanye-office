@@ -25,15 +25,30 @@ export function readComments(root,warn) {
 // Copying a range or splitting the paragraph must never annotate intervening text.
 export function commentWriter(escape) {
   const notes=[]
-  function paragraph(nodes,inline) {
+  function paragraph(nodes,inline,revisionStart,linkStart) {
     const spans=new Map()
-    let xml=''
+    let xml='', revision=null, href=null
     function close(id) {
       const index=spans.get(id)
       spans.delete(id)
       return '<w:commentRangeEnd w:id="'+index+'"/><w:r><w:commentReference w:id="'+index+'"/></w:r>'
     }
     for(const node of nodes) {
+      const mark=node.marks?.find(m=>m.type==='wordRevision')?.attrs
+      const next=mark && ['ins','del'].includes(mark.kind)?mark:null
+      const link=node.marks?.find(m=>m.type==='link')?.attrs?.href
+      const nextHref=/^(?:https?:\/\/|mailto:)/i.test(link)?link:null
+      // OOXML permits a revision inside a hyperlink, in this order only.
+      if (nextHref!==href || revision?.id!==next?.id || revision?.kind!==next?.kind) {
+        if (revision) xml+='</w:'+revision.kind+'>'
+        if (nextHref!==href) {
+          if (href) xml+='</w:hyperlink>'
+          href=nextHref
+          if (href) xml+=linkStart(href)
+        }
+        revision=next
+        if (revision) xml+=revisionStart(revision)
+      }
       const comments=(node.marks??[]).filter(m=>m.type==='wordComment' && m.attrs?.id && m.attrs?.text).map(m=>m.attrs)
       for(const id of spans.keys()) if(!comments.some(c=>c.id===id)) xml+=close(id)
       for(const c of comments) if(!spans.has(c.id)) {
@@ -43,6 +58,8 @@ export function commentWriter(escape) {
       }
       xml+=inline(node)
     }
+    if(revision) xml+='</w:'+revision.kind+'>'
+    if(href) xml+='</w:hyperlink>'
     for(const id of spans.keys()) xml+=close(id)
     return xml
   }

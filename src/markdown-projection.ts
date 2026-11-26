@@ -3,6 +3,7 @@ import type { Editor, JSONContent } from '@tiptap/core'
 import type { Node as ProseNode } from '@tiptap/pm/model'
 import { describeSource } from './markdown.js'
 import { editSource, editorSource } from './markdown-search.js'
+import { noteDefinition, prepareReferenceLabels } from './markdown-references'
 
 type Piece = { before: string; raw: string; node: ProseNode }
 export interface ReadingProjection {
@@ -14,6 +15,10 @@ export interface ReadingProjection {
 }
 const blocks = new Marked({ gfm: true })
 blocks.use({ extensions: [{
+  name:'noteDefinition', level:'block',
+  start: src => src.match(/(?:^|\n) {0,3}\[\^[^\]\s]+\]:/u)?.index,
+  tokenizer: noteDefinition,
+}, {
   name: 'displayMath', level: 'block',
   start: src => src.match(/(?:^|\n) {0,3}\$\$/)?.index,
   tokenizer(src) {
@@ -35,8 +40,14 @@ function literal(text: string, math = false): JSONContent {
 }
 
 function readingBlock(editor: Editor, token: Token, text: string): JSONContent {
+  if (token.type === 'noteDefinition') {
+    const body = editor.markdown!.parse(token.body).content
+    return {type:'noteDefinition',attrs:{label:token.label,prefix:token.prefix},
+      content:body?.length ? body : [{type:'paragraph'}]}
+  }
+  if (token.type === 'def') return {type:'linkDefinition',content:[{type:'text',text}]}
   if (token.type === 'displayMath') return literal(token.text, true)
-  if (token.type === 'html' || token.type === 'directive' || token.type === 'def' ||
+  if (token.type === 'html' || token.type === 'directive' ||
     (token.type !== 'code' && describeSource(text).sourceOnly)) return literal(text)
   const nodes = editor.markdown!.parse(text).content || []
   return nodes.length === 1 ? nodes[0] : literal(text)
@@ -74,7 +85,9 @@ export function openReading(editor: Editor, raw: string): ReadingProjection {
   }
   const front = /^---[ \t]*\n[\s\S]*?\n(?:---|\.\.\.)[ \t]*(?=\n|$)/u.exec(source)
   if (front && describeSource(front[0]).sourceOnly) emit(front[0], literal(front[0]))
-  for (const token of blocks.lexer(source.slice(cursor))) {
+  const tokens = blocks.lexer(source.slice(cursor))
+  prepareReferenceLabels(editor, Object.keys(tokens.links))
+  for (const token of tokens) {
     const at = source.indexOf(token.raw, cursor)
     if (at < 0) { gap(source.length - cursor); break }
     gap(at - cursor)

@@ -1,0 +1,13 @@
+.writing-area [data-note-ref] { color:var(--color-link-blue,#2eaadc); cursor:pointer; font-size:.75em; line-height:0; vertical-align:super; }
+.writing-area [data-note-ref]::before, .writing-area [data-note-def]::before { content:attr(data-citation); }
+.writing-area [data-note-ref]:focus-visible, .writing-area [data-note-back]:focus-visible { outline:1px solid currentColor; }
+.writing-area [data-note-def] { display:flex; align-items:baseline; gap:8px; font-size:.9em; margin-block:12px; }
+.writing-area [data-note-def]::before { color:#706d65; font-variant-numeric:tabular-nums; }
+.writing-area .md-note-body { min-width:0; }
+.writing-area .md-note-body > :first-child { margin-top:0; }
+.writing-area .md-note-body > :last-child { margin-bottom:0; }
+.writing-area [data-note-back] { border:0; background:transparent; color:var(--color-link-blue,#2eaadc); cursor:pointer; }
+.writing-area .md-link-definition { color:#706d65; font-family:Consolas,monospace; font-size:.875em; white-space:pre-wrap; overflow-wrap:anywhere; }
+.writing-area .md-ref-unresolved { color:inherit; text-decoration:none; }
+.writing-area .md-ref-unresolved::before { content:'['; }
+.writing-area .md-ref-unresolved::after { content:attr(data-ref-tail); }

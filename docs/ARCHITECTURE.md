@@ -1,6 +1,6 @@
 # 砚页 YanYe · Windows 本地端技术选型与架构
 
-## 0.6 桌面运行时与扩展入口
+## 0.7 桌面运行时与扩展入口
 
 Tauri 2 在 Windows WebView2 中加载随程序嵌入的 Vite 资源。React 管理编辑视图，TypeScript 描述桌面调用、菜单、围栏和功能区。已有的 JSX 编辑器由同一入口加载。Rust 在后台线程执行 SQLite 事务、修订重放、文件摘要计算和格式交换。Word 和演示稿的 PDF 输出使用 WebView2 打印引擎。[Tauri 命令模型](https://v2.tauri.app/develop/calling-rust/) · [WebView2 打印](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/print)
 
@@ -9,6 +9,10 @@ Tauri 2 在 Windows WebView2 中加载随程序嵌入的 Vite 资源。React 管
 | 桌面能力 | [TypeScript 桥](../src/desktop/bridge.ts)、[Rust 入口](../src-tauri/src/main.rs) | 桥接在渲染 React 前就绪。渲染进程持有文件 ID，路径与原生对话框由宿主管理 |
 | 保存与恢复 | [写入队列](../src/desktop/staged-writes.ts)、[工作区事务](../src-tauri/src/workspace.rs)、[磁盘文件](../src-tauri/src/files.rs) | 增量按修订顺序提交。失败时保留未确认队首。工作区修订和磁盘原件摘要分别校验 |
 | 围栏语言或图形 | [语言与别名](../src/markdown-languages.ts)、[代码块](../src/MarkdownFence.tsx)、[源码映射](../src/markdown-projection.ts) | 引擎按需载入。阅读视图将改动写回原文。特殊图形保留可编辑的围栏文本 |
+| Markdown 源码与引用 | [CodeMirror 视图](../src/MarkdownSource.jsx)、[语法着色](../src/markdown-source-language.ts)、[脚注与链接](../src/markdown-references.ts) | 大小文稿共用源码编辑器，行尾映射参与撤销。引用按定义解析，保存时优先使用未改动的原文片段 |
+| DOCX 分节与文字修订 | [节属性](../src/modules/word-section-xml.js)、[修订事务](../src/modules/word-revisions.js) | 逐节持有版式。文字修订同时记录删除和插入的数据，以便拒绝改动 |
+| Excel 透视与 XLSM | [透视表打包](../src/modules/sheet-pivot-xml.js)、[原件保留](../src/modules/preserved-workbook.js)、[VBA 读取](../src/modules/vba-reader.js) | 普通透视表写入原生缓存和关系。宏文件另走原包路径，读取模块源码与执行宏分离 |
+| PPTX 对象动画 | [动画模型与时间线](../src/modules/slide-animations.js) | 常规效果使用对象标识映射。外来复杂时间线保留原 XML，无法安全重映射时阻止有损保存 |
 | 编辑命令与功能区 | [Markdown 上下文菜单](../src/menus/MarkdownContextTools.tsx)、[Office 功能区](../src/office/Ribbon.tsx) | 菜单调用编辑器命令。命令可用条件、当前选区和撤销由所属编辑器管理 |
 
 0.5 工作区与文件中心继续使用原目录。数据库升级与文件格式逻辑可以用独立临时目录验证，桌面验收还会启动真实 WebView2 窗口。以下章节记录此前各版本的架构和选型背景。

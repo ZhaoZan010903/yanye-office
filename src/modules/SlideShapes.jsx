@@ -15,7 +15,7 @@ export function SlideShape({ shape, selected, onSelect, onMove }) {
   }
   const element = shape.kind==='ellipse' ? <ellipse cx="50" cy="50" rx="49.5" ry="49.5"/> :
     polygons[shape.kind] ? <polygon points={polygons[shape.kind]}/> : <rect x=".5" y=".5" width="99" height="99" rx={shape.kind==='roundRect'?12:0}/>
-  return <div className={'slide-shape'+(selected?' selected':'')} style={style} tabIndex={onMove ? 0 : undefined}
+  return <div data-animation-target={shape.id} className={'slide-shape'+(selected?' selected':'')} style={style} tabIndex={onMove ? 0 : undefined}
     role={onMove?'button':undefined} aria-label={onMove?'选择形状 '+(shape.text || shapeKinds[shape.kind]):undefined}
     onFocus={onSelect} onKeyDown={e=>{
       if (!onMove) return

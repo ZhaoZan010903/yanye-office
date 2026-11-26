@@ -3,6 +3,7 @@ import { base64, base64Bytes, decodeText, detectEncoding, encodeText, legacyChin
 export const fileTypes = Object.freeze({
   docx: { kind: 'word', label: 'Word 文档', initialName: '新建文档' },
   xlsx: { kind: 'spreadsheet', label: 'Excel 工作簿', initialName: '新建工作簿' },
+  xlsm: { kind:'spreadsheet', label:'启用宏的工作簿', initialName:'工作簿', openOnly:true },
   pptx: { kind: 'presentation', label: 'PowerPoint 演示文稿', initialName: '新建演示文稿' },
   md: { kind: 'note', label: 'Markdown 文档', initialName: '新建笔记' },
   txt: { kind:'txt', label:'纯文本', initialName:'新建文本' },
@@ -12,6 +13,7 @@ export const fileTypes = Object.freeze({
 export function pageExtension(page) {
   if (!page) return null
   if (page.disk) return page.disk.extension
+  if (page.content?.preserved?.base) return page.content.preserved.base.extension
   if (page.kind === 'word') return 'docx'
   if (page.kind === 'txt') return 'txt'
   if (page.kind === 'pdf') return null
@@ -51,10 +53,16 @@ export async function readOfficeFile(file, chooseEncoding) {
       const { readDocx } = await import('./modules/word-docx.js')
       return { content: await readDocx(content) }
     }
-    case 'xlsx': {
+    case 'xlsx':
+    case 'xlsm': {
       const { readXlsx } = await import('./modules/spreadsheet-xlsx.js')
       const sheets = await readXlsx(content)
-      return { content: { sheets, active: sheets[0].id } }
+      const book={sheets, active:sheets[0].id}
+      if(extension==='xlsm' || sheets.some(s=>s.advancedPivot)) {
+        const {preservedMetadata}=await import('./modules/preserved-workbook.js')
+        book.preserved=await preservedMetadata(base64Bytes(content))
+      }
+      return {content:book}
     }
     case 'pptx': {
       const { importPptx } = await import('./modules/slides-pptx.js')
@@ -64,7 +72,14 @@ export async function readOfficeFile(file, chooseEncoding) {
   }
 }
 
-export async function writeOfficeFile(page) {
+export async function writeOfficeFile(page, readOriginal) {
+  if(page.content?.preserved || page.disk?.extension==='xlsm') {
+    const base=page.content?.preserved?.base || page.disk
+    if(!base || !readOriginal) throw Error('需要按原件修订读取此工作簿，才能保留 VBA 和工作簿对象。')
+    const bytes=await readOriginal(base.id,base.revision)
+    const {patchWorkbook}=await import('./modules/preserved-workbook.js')
+    return base64(await patchWorkbook(bytes,page.content.preserved?.edits || {}))
+  }
   switch (pageExtension(page)) {
     case 'md': return page.markdown
     case 'txt': {

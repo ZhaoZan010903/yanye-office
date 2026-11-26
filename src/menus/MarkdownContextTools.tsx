@@ -19,7 +19,7 @@ type Props = {
 }
 type Anchor = { x: number, y: number, target: Element, source: boolean }
 type Size = { rows: number, columns: number }
-const surface = '.writing-area, textarea[aria-label="Markdown 源码"], .md-source-large .cm-content'
+const surface = '.writing-area, .md-source-surface .cm-content'
 const contextual = 'a[href],td,th'
 
 export default function MarkdownContextTools({ editor, rootRef, sourceRef, sourceMode, onLink }: Props) {
@@ -162,8 +162,7 @@ export default function MarkdownContextTools({ editor, rootRef, sourceRef, sourc
   const preview = fence?.querySelector<HTMLButtonElement>('button[aria-label="编辑此块源码"],button[aria-label="预览此块"]')
   const picture = target?.closest('img')
 
-  const textInput = sourceRef.current instanceof HTMLTextAreaElement ? sourceRef.current : null
-  const editing = menu ? selectionCommands(e,menu.source,menu.target,textInput) : null
+  const editing = menu ? selectionCommands(e,menu.source,menu.target) : null
   function tableAction(command: () => unknown) {
     if (cell && focusCell(e,cell)) return command()
   }

@@ -17,12 +17,7 @@ export default function MarkdownFind({ editor, sourceRef, source, replacing, clo
     const i=(n+matches.length)%matches.length, {from,to}=matches[i]
     setIndex(i)
     if (source !== null) {
-      const text=sourceRef.current
-      if(!text) return
-      if(text.selectSource) {text.selectSource(from,to);return}
-      text.focus(); text.setSelectionRange(from,to)
-      const line=source.slice(0,from).split('\n').length-1
-      text.scrollTop=Math.max(0, line*parseFloat(getComputedStyle(text).lineHeight)-text.clientHeight/2)
+      sourceRef.current?.selectSource(from,to)
     } else {
       editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(doc,from,to)).scrollIntoView())
       editor.view.focus()
@@ -32,14 +27,7 @@ export default function MarkdownFind({ editor, sourceRef, source, replacing, clo
     if (!matches.length || (all && matches.length>10000)) return
     const selected=all ? matches : [matches[Math.max(0,current)]]
     if (source !== null) {
-      if(!sourceRef.current) return
-      if(sourceRef.current.replaceRanges) {sourceRef.current.replaceRanges(selected,replacement);return}
-      const text=sourceRef.current, first=selected[0].from, last=selected.at(-1).to
-      let insert='', end=first
-      for (const match of selected) { insert+=source.slice(end,match.from)+replacement; end=match.to }
-      text.focus(); text.setSelectionRange(first,last)
-      if (insert.length) document.execCommand('insertText',false,insert)
-      else document.execCommand('delete')
+      sourceRef.current?.replaceRanges(selected,replacement)
     } else {
       const tr=editor.state.tr
       for (let i=selected.length-1; i>=0; i--) {

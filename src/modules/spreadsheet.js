@@ -226,6 +226,7 @@ export function renameSheet(book, id, name) {
 }
 
 export function removeSheet(book, id) {
+  if (book.sheets.some(s=>s.pivot?.sourceId===id)) throw new Error('此工作表是透视表的数据源。请先删除对应透视表。')
   if (book.sheets.length <= 1) throw new Error('工作簿须保留一张工作表。')
   const target = book.sheets.find(sheet => sheet.id === id)
   const names = new Map([[sheetKey(target.name), null]])
@@ -296,6 +297,7 @@ export function formatted(value,style) {
 }
 
 export function shiftGrid(book, id, axis, index, delta) {
+  if (book.sheets.some(s=>s.pivot && (s.id===id || s.pivot.sourceId===id))) throw new Error('请先调整或移除对应透视表，再插入或删除整行整列。')
   const target = book.sheets.find(sheet => sheet.id === id)
   const size = axis === 'row' ? 'rows' : 'cols'
   if (target[size] + delta < 1 || target[size] + delta > LIMITS[size]) throw new Error('已达到行列数量边界。')

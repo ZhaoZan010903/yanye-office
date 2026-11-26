@@ -2,8 +2,7 @@ export const papers = { A4:[210,297], A3:[297,420], A5:[148,210], B5:[176,250], 
 export const blankDoc = { type: 'doc', content: [{ type: 'paragraph' }] }
 export const defaultLayout = { paper: 'A4', landscape: false, top: 25.4, bottom: 25.4, left: 25.4, right: 25.4 }
 
-export function wordValue(value = {}) {
-  const incoming = value?.layout ?? {}
+export function sectionLayout(incoming = {}) {
   const layout = { ...defaultLayout, paper: Object.hasOwn(papers, incoming.paper) ? incoming.paper : 'A4', landscape: incoming.landscape === true }
   for (const side of ['top', 'bottom', 'left', 'right']) {
     if (Number.isFinite(incoming[side])) layout[side] = Math.max(0, Math.min(65, incoming[side]))
@@ -18,7 +17,25 @@ export function wordValue(value = {}) {
   if (incoming.differentFirst) layout.differentFirst = true
   if (incoming.differentEven) layout.differentEven = true
   for (const key of ['headerDistance','footerDistance']) if (Number.isFinite(incoming[key])) layout[key] = Math.max(0,Math.min(65,incoming[key]))
-  return { doc: value?.doc?.type === 'doc' ? value.doc : blankDoc, layout, compatibility: value?.compatibility ?? [] }
+  if (['nextPage','continuous','evenPage','oddPage','nextColumn'].includes(incoming.start)) layout.start = incoming.start
+  if (Number.isInteger(incoming.columns) && incoming.columns >= 1 && incoming.columns <= 45) layout.columns = incoming.columns
+  if (Number.isFinite(incoming.columnGap)) layout.columnGap = Math.max(0, Math.min(100, incoming.columnGap))
+  if (Number.isInteger(incoming.pageStart) && incoming.pageStart > 0) layout.pageStart = incoming.pageStart
+  if (incoming.nativeSection && typeof incoming.nativeSection==='object') layout.nativeSection=incoming.nativeSection
+  return layout
+}
+
+export function wordValue(value = {}) {
+  const layout = sectionLayout(value?.layout)
+  return { ...(value?.protectedRevisions ? {protectedRevisions:true} : {}), ...(value?.trackChanges ? {trackChanges: true} : {}), doc: value?.doc?.type === 'doc' ? value.doc : blankDoc, layout, compatibility: value?.compatibility ?? [] }
+}
+
+// An omitted header/footer relationship inherits that slot from the prior
+// section. An explicitly empty part deliberately overrides that inheritance.
+export function inheritedBands(layout, previous={}) {
+  const bands={}
+  for (const type of ['default','first','even']) bands[type]={...previous[type],...layout.bands?.[type]}
+  return {...layout,bands}
 }
 
 export function paperDimensions(layout) {

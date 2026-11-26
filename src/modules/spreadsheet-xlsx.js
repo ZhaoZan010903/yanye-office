@@ -1,6 +1,6 @@
 import { bounds, evaluator, filterRow, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
 
-export const exchangeNote = 'XLSX 支持值、公式、常用数字格式、字体、边框、对齐、合并、行高列宽、冻结、列表验证、数值条件格式、按值筛选和每表一张引用本表数据的分组柱形或条形图。日期转为文本。其他图表、图片、宏和高级筛选条件可能丢失。CSV 导出当前表的计算结果。'
+export const exchangeNote = 'XLSX 支持值、公式、常用样式、冻结、验证、数值条件格式、按值筛选、分组柱形或条形图，以及单行字段与单值字段的数据透视表。日期转为文本。含复杂图形或外部连接的模板请保留原件。XLSM 从文件中心按原包保存。CSV 导出当前表的计算结果。'
 const formatByCode = new Map(Object.entries(numberFormats).map(([key,[,code]])=>[code,key]))
 
 export function availableName(proposed, sheets) {
@@ -15,14 +15,20 @@ export function availableName(proposed, sheets) {
 }
 
 export function appendSheets(book, imported) {
+  if(imported.some(s=>s.advancedPivot)) throw Error('含高级透视表的文件请从文件中心打开，以保留原始透视部件。')
   if (book.sheets.length + imported.length > LIMITS.sheets) throw new Error('每个工作簿最多支持 32 张工作表。')
   const names = new Map()
   const reserved = [...book.sheets]
+  const pivots=new Set(book.sheets.filter(s=>s.pivot).map(s=>s.pivot.name.toLowerCase()))
   const sheets = imported.map(sheet => {
     const name = availableName(sheet.name, reserved)
     names.set(sheet.name.toLowerCase(),name)
     reserved.push({ name })
-    return { ...sheet, name }
+    if(!sheet.pivot) return {...sheet,name}
+    let pivotName=sheet.pivot.name, n=1
+    while(pivots.has(pivotName.toLowerCase())) pivotName='PivotTable'+n++
+    pivots.add(pivotName.toLowerCase())
+    return { ...sheet, name, pivot:{...sheet.pivot,name:pivotName} }
   }).map(sheet => ({ ...sheet, cells: Object.fromEntries(Object.entries(sheet.cells).map(([ref,raw]) =>
     [ref,renameReferences(raw,names)])) }))
   return { ...book, sheets: [...book.sheets, ...sheets], active: sheets[0].id }
@@ -64,8 +70,10 @@ export async function readXlsx(base64) {
   await workbook.xlsx.load(bytes, { ignoreNodes: ['drawing','picture','dataValidations'] })
   if (!workbook.worksheets.length || workbook.worksheets.length > LIMITS.sheets) throw new Error('XLSX 须含 1 到 32 张工作表。')
   const {nativeRules}=await import('./sheet-xml-rules.js')
-  const rules=await nativeRules(bytes)
-  return workbook.worksheets.map(ws => {
+  const {default:JSZip}=await import('jszip')
+  const zip=await JSZip.loadAsync(bytes)
+  const rules=await nativeRules(bytes,zip)
+  const sheets=workbook.worksheets.map(ws => {
     if (ws.rowCount > LIMITS.rows || ws.columnCount > LIMITS.cols) throw new Error('单表最多 5000 行、128 列。')
     const sheet = newSheet(ws.name)
     const native=rules.get(ws.name)
@@ -137,9 +145,17 @@ export async function readXlsx(base64) {
     }
     return sheet
   })
+  const {readPivotParts}=await import('./sheet-pivot-xml.js')
+  await readPivotParts(zip,sheets)
+  return sheets
 }
 
 export async function writeXlsx(book) {
+  if(book.sheets.some(s=>s.advancedPivot)) throw Error('高级透视部件需要原始工作簿才能保存。')
+  if(book.sheets.some(s=>s.pivot)) {
+    const {refreshPivot}=await import('./sheet-pivot.js')
+    book={...book,sheets:book.sheets.map(sheet=>sheet.pivot ? refreshPivot(book,sheet) : sheet)}
+  }
   const workbook = await excelWorkbook()
   workbook.calcProperties.fullCalcOnLoad = true
   const display = evaluator(book)

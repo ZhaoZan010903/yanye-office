@@ -8,6 +8,8 @@ import {
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
 import FontPicker from './FontPicker.jsx'
 import SheetRules from './SheetRules.jsx'
+import SheetPivot from './SheetPivot.jsx'
+import { editsPivotResults, refreshPivot } from './sheet-pivot.js'
 import {chartData,newChart,palettes} from './sheet-chart.js'
 import {conditionalFill,conditionRules,filterRow,listChoices,validationAt} from './spreadsheet.js'
 import './spreadsheet.css'
@@ -91,6 +93,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const [formulaVisible,setFormulaVisible] = useState(true)
   const [widthEditor, setWidthEditor] = useState(false)
   const [ruleMode,setRuleMode]=useState('')
+  const [pivotOpen,setPivotOpen]=useState(false)
   const history = useRef({past:[],future:[]})
   const drag = useRef(false)
   const clipboard = useRef(null)
@@ -197,11 +200,12 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }
   function applyStyle(patch) { updateSheet(changeCellStyle(sheet,rangeRows,range.left,range.right,patch)) }
   function updateSheet(next) {
+    if(editsPivotResults(sheet,next)) {setNotice('透视结果由源数据生成，请修改源单元格后刷新。');return}
     const current = latest.current
     change({ ...current, sheets:current.sheets.map(s=>s.id===next.id ? next : s) })
   }
   function tryAction(fn) {
-    try { fn(); setNotice('') } catch (error) { setNotice(error.message) }
+    try { setNotice(''); fn() } catch (error) { setNotice(error.message) }
   }
   function put(text) {
     tryAction(() => updateSheet(writeRange(sheet,row,col,[[text]])))
@@ -317,7 +321,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }
   return <section className="sheet-module" data-gridlines={gridlines} aria-label="电子表格">
     <Ribbon label="表格" tabs={['开始','插入','公式','数据','视图','文件']} active={tab}
-      onChange={next=>{setTab(next);setWidthEditor(false);setRuleMode('');setFilterOpen(false)}}/>
+      onChange={next=>{setTab(next);setWidthEditor(false);setRuleMode('');setFilterOpen(false);setPivotOpen(false)}}/>
     {tab!=='公式' && <div className="sheet-toolbar ribbon-panel">
       {tab==='开始' && <><RibbonGroup label="编辑">
       <button className="sheet-action" aria-label="撤销表格操作" title="撤销 Ctrl+Z" disabled={!history.current.past.length} onClick={()=>undo()}><Undo2 size={15}/></button>
@@ -362,6 +366,13 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       {tab==='插入' && <RibbonGroup label="行与列">
         <button className="sheet-action" onClick={()=>structure('row',1)}>插入行</button>
         <button className="sheet-action" onClick={()=>structure('col',1)}>插入列</button>
+      </RibbonGroup>}
+      {(tab==='插入' || tab==='数据') && <RibbonGroup label="透视分析">
+        <button className="sheet-action" onClick={()=>setPivotOpen(v=>!v)}>{sheet.pivot?'透视表字段':'数据透视表'}</button>
+        {sheet.pivot && <button className="sheet-action" onClick={()=>tryAction(()=>{
+          const next=refreshPivot(book,sheet)
+          change({...book,sheets:book.sheets.map(s=>s.id===sheet.id?next:s)})
+        })}>刷新数据透视表</button>}
       </RibbonGroup>}
       {tab==='视图' && <><RibbonGroup label="显示">
         <label><input type="checkbox" checked={gridlines} onChange={e=>setGridlines(e.target.checked)}/>网格线</label>
@@ -435,6 +446,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       <button onClick={()=>{change(removeSheet(book,sheet.id));setRemoving(null);select({row:0,col:0});setEditing(false)}}>确认删除工作表</button>
       <button onClick={()=>setRemoving(null)}>取消</button>
     </div>}
+    {pivotOpen && <SheetPivot key={sheet.id} book={book} sheet={sheet} range={range} display={display} apply={change} close={()=>setPivotOpen(false)}/>}
     {ruleMode && <SheetRules key={sheet.id+':'+rangeName(range)+':'+ruleMode} mode={ruleMode} sheet={sheet} box={range} apply={updateSheet} close={()=>setRuleMode('')} tryAction={tryAction}/>}
     {filterColumn && <div className="sheet-filter"><Filter size={14}/><label>{columnName(col)} 列筛选 <select aria-label="列值筛选" value={JSON.stringify(nativeFilter.columns[filterOffset]??null)} onChange={e=>{
       const columns={...nativeFilter.columns}, values=JSON.parse(e.target.value)

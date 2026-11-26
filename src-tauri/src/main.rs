@@ -63,7 +63,7 @@ impl Desktop {
                     .to_ascii_lowercase();
                 if matches!(
                     ext.as_str(),
-                    "docx" | "xlsx" | "pptx" | "md" | "txt" | "pdf"
+                    "docx" | "xlsx" | "xlsm" | "pptx" | "md" | "txt" | "pdf"
                 ) && p.is_file()
                 {
                     queue.push_back(p);
@@ -157,13 +157,15 @@ impl Desktop {
                         return Ok(false.into());
                     }
                 }
+                let bases = db.workbook_bases();
                 drop(guard);
                 // Wait for any file operation in flight before destroying its originating window.
-                drop(
-                    self.library
-                        .lock()
-                        .map_err(|_| anyhow::anyhow!("文件中心状态不可用。"))?,
-                );
+                let _library = self
+                    .library
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("文件中心状态不可用。"))?;
+                // A crash may leave an unreferenced original. Retry cleanup on a future clean exit.
+                let _ = files::prune_workbook_bases(&self.profile, &bases);
                 window.destroy()?;
                 Ok(true.into())
             }

@@ -11,6 +11,7 @@ const marks = {
 
 // The folded sheet and inner mark identify each format at tab and tile sizes.
 export function FileGlyph({ extension, size=18 }) {
+  if (extension==='xlsm') extension='xlsx'
   if (!Object.hasOwn(marks,extension)) return null
   return <svg className={'file-glyph type-'+extension} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
     <path d="M4 2h10.4L20 7.6V21a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" fill="var(--file-tint)" stroke="var(--file-ink)" strokeWidth="1.25" strokeLinejoin="round"/>

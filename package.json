@@ -1,7 +1,7 @@
 {
   "name": "yanye",
   "productName": "砚页",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "YanYe Team",
   "license": "MIT",
   "description": "砚页 YanYe，面向 Windows 的本地文档、表格、白板与演示工作区",
@@ -15,7 +15,7 @@
     "start": "pnpm build && electron .",
     "package:win": "pnpm build && node scripts/package-win.mjs",
     "test": "node --test \"test/*.test.mjs\"",
-    "test:desktop": "pnpm build && node test/desktop.mjs"
+    "test:desktop": "pnpm build && node test/desktop.mjs && node test/files-desktop.mjs"
   },
   "dependencies": {
     "@tiptap/core": "3.35.0",

@@ -34,6 +34,7 @@ test('legacy workspace upgrades on first office page and preserves saved notes a
   let state = addPage(loaded,makePage({kind:'note',id:'new-note'}))
   assert.equal(state.schemaVersion,1)
   for (const [kind,title] of Object.entries(officeKinds)) {
+    if (kind === 'word') continue
     state = addPage(state,makePage({id:kind,kind,title,parentId:'legacy'}))
     assert.equal(state.schemaVersion,2)
     assert.deepEqual(state.pages.at(-1).content,{})
@@ -55,7 +56,7 @@ test('legacy workspace upgrades on first office page and preserves saved notes a
 test('schema loader rejects unsupported versions, office kinds in 0.1, missing office payloads and invalid navigation', () => {
   const sheet = makePage({id:'s',kind:'spreadsheet'})
   const valid = addPage(legacy,sheet)
-  for (const version of [0,3,'2']) assert.throws(()=>assertWorkspace({...valid,schemaVersion:version}))
+  for (const version of [0,4,'2']) assert.throws(()=>assertWorkspace({...valid,schemaVersion:version}))
   assert.throws(()=>assertWorkspace({...valid,schemaVersion:1}))
   for (const content of [undefined,null,[],false,'sheet']) {
     assert.throws(()=>assertWorkspace(updatePage(valid,'s',{content})))
@@ -63,6 +64,16 @@ test('schema loader rejects unsupported versions, office kinds in 0.1, missing o
   assert.throws(()=>assertWorkspace(updatePage(valid,'s',{kind:'unknown'})))
   assert.throws(()=>assertWorkspace({...valid,activeId:'legacy-trash'}))
   assert.equal(assertWorkspace(valid),valid)
+})
+
+test('Word and file bindings upgrade earlier workspaces without downgrading when a grid is added', () => {
+  const disk = {id:'file-1', name:'采购.md', extension:'md', revision:'abc', dirty:true}
+  const bound = updatePage(legacy,'legacy',{disk})
+  assert.equal(assertWorkspace(bound).schemaVersion,3)
+  const withWord = addPage(legacy, makePage({id:'word',kind:'word'}))
+  assert.equal(assertWorkspace(withWord).schemaVersion,3)
+  assert.equal(assertWorkspace(addPage(withWord,makePage({kind:'database'}))).schemaVersion,3)
+  assert.throws(()=>assertWorkspace({...withWord,schemaVersion:2}))
 })
 
 test('workspace size calculation matches serialized UTF-8 across page changes, escapes and multibyte text', () => {

@@ -1,6 +1,6 @@
-import { address, evaluator, isNumberText, LIMITS, newSheet, renameReferences, validName } from './spreadsheet.js'
+import { bounds, evaluator, isNumberText, LIMITS, location, newSheet, rangeName, renameReferences, validName } from './spreadsheet.js'
 
-export const exchangeNote = 'XLSX 支持值、公式及基础数值格式。日期转为文本，图片、图表、宏和复杂版式不参与转换。CSV 导出当前表的计算结果。'
+export const exchangeNote = 'XLSX 保留值、公式、常用数字格式、字体字号、加粗、斜体、RGB 字色和填充、水平对齐、合并区域、行高列宽及首行首列冻结。日期转为文本。图片、图表、宏与复杂样式超出当前转换范围。CSV 导出当前表的计算结果。'
 const numberFormats = { number:'0.00', currency:'"¥"#,##0.00', percent:'0.00%' }
 
 export function availableName(proposed, sheets) {
@@ -52,6 +52,8 @@ async function excelWorkbook() {
 }
 
 const plainText = value => value.startsWith('=') || value.startsWith("'") || isNumberText(value) ? "'" + value : value
+const rgb = color => /^[a-f\d]{8}$/i.test(color?.argb ?? '') ? '#' + color.argb.slice(2).toUpperCase() : undefined
+const argb = color => 'FF' + color.slice(1).toUpperCase()
 
 export async function readXlsx(base64) {
   if (base64.length > Math.ceil(32 * 1024 * 1024 / 3) * 4) throw new Error('XLSX 文件超过 32 MiB 导入上限。')
@@ -65,9 +67,54 @@ export async function readXlsx(base64) {
     const sheet = newSheet(ws.name)
     sheet.rows = Math.max(sheet.rows,ws.rowCount)
     sheet.cols = Math.max(sheet.cols,ws.columnCount)
-    ws.eachRow((row,r) => row.eachCell((cell,c) => {
+    const frozen = ws.views?.find(v => v.state === 'frozen')
+    if (frozen?.xSplit === 1) sheet.freezeColumn = true
+    if (frozen?.ySplit === 1) sheet.freezeHeader = true
+    const worksheetModel = ws.model
+    for (const column of worksheetModel.cols ?? []) {
+      if (!(column.width > 0) || column.min > LIMITS.cols) continue
+      sheet.cols=Math.max(sheet.cols,Math.min(column.max,LIMITS.cols))
+      for (let num=column.min; num<=Math.min(column.max,LIMITS.cols); num++) {
+        (sheet.widths ??= {})[num-1]=Math.min(255,column.width)
+      }
+    }
+    sheet.merges = (worksheetModel.merges ?? []).map(range => {
+      const [a,b] = range.split(':').map(location)
+      if (!a || !b || b.row >= LIMITS.rows || b.col >= LIMITS.cols) throw new Error('合并区域超出支持的行列数。')
+      return bounds(a,b)
+    })
+    for (const row of worksheetModel.rows) {
+      if (row.height > 0) {
+        if (row.number > LIMITS.rows) throw new Error('单表最多 5000 行。')
+        sheet.rows=Math.max(sheet.rows,row.number)
+        sheet.heights ??= {}
+        sheet.heights[row.number-1]=row.height
+      }
+    }
+    for (const row of worksheetModel.rows) for (const model of row.cells) {
+      const ref = model.address, pos = location(ref)
+      if (!pos || pos.col >= LIMITS.cols || pos.row >= LIMITS.rows) throw new Error('单表最多 5000 行、128 列。')
+      const cell = ws.getCell(ref)
+      sheet.rows = Math.max(sheet.rows,pos.row+1)
+      sheet.cols = Math.max(sheet.cols,pos.col+1)
+      if (cell.isMerged && cell.master.address !== ref) continue
+      const style = {}
+      if (cell.font?.bold) style.bold = true
+      if (cell.font?.italic) style.italic = true
+      if (cell.font?.name) style.font = cell.font.name
+      if (cell.font?.size) style.size = cell.font.size
+      if (rgb(cell.font?.color)) style.color = rgb(cell.font.color)
+      if (cell.fill?.pattern === 'solid' && rgb(cell.fill.fgColor)) style.fill = rgb(cell.fill.fgColor)
+      if (['left','center','right'].includes(cell.alignment?.horizontal)) style.align = cell.alignment.horizontal
+      if (Object.keys(style).length) (sheet.styles ??= {})[ref] = style
+      const format = String(cell.numFmt ?? '')
+      let numFmt
+      if (/%/.test(format)) numFmt = 'percent'
+      else if (/[¥￥]/.test(format)) numFmt = 'currency'
+      else if (format === '0.00' || format === '#,##0.00') numFmt = 'number'
+      if (numFmt) (sheet.formats ??= {})[ref] = numFmt
       const value = cell.value
-      if (value === null || value === undefined || (cell.isMerged && cell.master.address !== cell.address)) return
+      if (value === null || value === undefined) continue
       let raw
       if (typeof value === 'string') raw = plainText(value)
       else if (typeof value === 'number' || typeof value === 'boolean') raw = String(value)
@@ -75,15 +122,8 @@ export async function readXlsx(base64) {
       else if (value instanceof Date) raw = value.toISOString().replace(/T00:00:00\.000Z$/, '')
       else raw = plainText(cell.text ?? '')
       if (raw.length > LIMITS.text) throw new Error('单元格超过 32767 字符。')
-      const ref = address(r-1,c-1)
       if (raw) sheet.cells[ref] = raw
-      const format = String(cell.numFmt ?? '')
-      let style
-      if (/%/.test(format)) style = 'percent'
-      else if (/[¥￥]/.test(format)) style = 'currency'
-      else if (format === '0.00' || format === '#,##0.00') style = 'number'
-      if (style) (sheet.formats ??= {})[ref] = style
-    }))
+    }
     return sheet
   })
 }
@@ -94,15 +134,32 @@ export async function writeXlsx(book) {
   const display = evaluator(book)
   for (const sheet of book.sheets) {
     const ws = workbook.addWorksheet(sheet.name)
+    for (const [index,height] of Object.entries(sheet.heights ?? {})) ws.getRow(Number(index)+1).height=height
+    for (const [index,width] of Object.entries(sheet.widths ?? {})) ws.getColumn(Number(index)+1).width=width
+    if (sheet.freezeColumn || sheet.freezeHeader) ws.views = [{state:'frozen', xSplit:sheet.freezeColumn ? 1 : 0, ySplit:sheet.freezeHeader ? 1 : 0}]
+    for (const box of sheet.merges ?? []) ws.mergeCells(rangeName(box))
     for (const [ref,raw] of Object.entries(sheet.cells)) {
       const cell = ws.getCell(ref)
       if (raw.startsWith('=')) {
         const result = display(sheet,ref)
-        cell.value = { formula: raw.slice(1), ...(typeof result === 'number' ? { result } : {}) }
+        const cached = typeof result === 'string' && result.startsWith('#') ? {} : {result}
+        cell.value = { formula: raw.slice(1), ...cached }
       } else cell.value = raw.startsWith("'") ? raw.slice(1) : isNumberText(raw) ? Number(raw) : raw
     }
     for (const [ref,style] of Object.entries(sheet.formats ?? {})) {
       if (Object.hasOwn(numberFormats,style)) ws.getCell(ref).numFmt = numberFormats[style]
+    }
+    for (const [ref,style] of Object.entries(sheet.styles ?? {})) {
+      const cell = ws.getCell(ref)
+      if (cell.isMerged && cell.master.address !== ref) continue
+      if (style.bold || style.italic || style.color || style.font || style.size) cell.font = {
+        bold: Boolean(style.bold), italic: Boolean(style.italic),
+        ...(style.color ? { color: { argb:argb(style.color) } } : {}),
+        ...(style.font ? {name:style.font} : {}),
+        ...(style.size ? {size:style.size} : {}),
+      }
+      if (style.fill) cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:argb(style.fill)}}
+      if (style.align) cell.alignment = {horizontal:style.align}
     }
   }
   const bytes = new Uint8Array(await workbook.xlsx.writeBuffer())

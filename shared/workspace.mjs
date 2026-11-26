@@ -4,6 +4,7 @@ export const MAX_PAGES = 2_000
 export const MAX_WORKSPACE_BYTES = 24 * 1024 * 1024
 
 export const officeKinds = Object.freeze({
+  word: 'Word 文档',
   spreadsheet: '电子表格',
   database: '多维表格',
   canvas: '流程图与白板',
@@ -113,7 +114,7 @@ export function addPage(workspace, page) {
   if (page.parentId && !isVisible(byId.get(page.parentId), byId)) {
     throw new Error('父页面已移动到回收站。')
   }
-  const schemaVersion = Object.hasOwn(officeKinds, page.kind) ? 2 : workspace.schemaVersion
+  const schemaVersion = Math.max(workspace.schemaVersion, page.disk || page.kind === 'word' ? 3 : Object.hasOwn(officeKinds, page.kind) ? 2 : 1)
   return openPage({ ...workspace, schemaVersion, pages: [...workspace.pages, page] }, page.id)
 }
 
@@ -122,6 +123,7 @@ export function updatePage(workspace, id, fields) {
   if (!page || Object.entries(fields).every(([key, value]) => page[key] === value)) return workspace
   return {
     ...workspace,
+    schemaVersion: fields.disk ? 3 : workspace.schemaVersion,
     pages: workspace.pages.map(candidate => candidate.id === id
       ? { ...candidate, ...fields, updatedAt: new Date().toISOString() }
       : candidate),
@@ -171,7 +173,7 @@ export function setCollapsed(workspace, id, collapsed) {
 }
 
 export function assertWorkspace(workspace) {
-  if (!workspace || ![1, 2].includes(workspace.schemaVersion) || !Number.isSafeInteger(workspace.revision) || workspace.revision < 0 ||
+  if (!workspace || ![1, 2, 3].includes(workspace.schemaVersion) || !Number.isSafeInteger(workspace.revision) || workspace.revision < 0 ||
       !Array.isArray(workspace.pages) || workspace.pages.length > MAX_PAGES || !Array.isArray(workspace.collapsedIds)) {
     throw new Error('工作区文件格式无法读取。')
   }
@@ -182,7 +184,11 @@ export function assertWorkspace(workspace) {
         typeof page.title !== 'string' || page.title.length > MAX_TITLE_LENGTH ||
         typeof page.markdown !== 'string' || page.markdown.length > MAX_MARKDOWN_LENGTH ||
         !pageKinds.has(page.kind) || typeof page.favorite !== 'boolean' ||
-        (Object.hasOwn(officeKinds, page.kind) && (workspace.schemaVersion !== 2 || !page.content || typeof page.content !== 'object' || Array.isArray(page.content))) ||
+        (Object.hasOwn(officeKinds, page.kind) && (workspace.schemaVersion < 2 || !page.content || typeof page.content !== 'object' || Array.isArray(page.content))) ||
+        (page.kind === 'word' && workspace.schemaVersion < 3) ||
+        (page.disk != null && (workspace.schemaVersion < 3 || typeof page.disk.id !== 'string' ||
+          typeof page.disk.name !== 'string' || !['docx','xlsx','pptx','md'].includes(page.disk.extension) ||
+          typeof page.disk.revision !== 'string' || typeof page.disk.dirty !== 'boolean')) ||
         typeof page.createdAt !== 'string' || typeof page.updatedAt !== 'string' ||
         !(page.deletedAt === null || typeof page.deletedAt === 'string')) {
       throw new Error('工作区包含无效的页面。')

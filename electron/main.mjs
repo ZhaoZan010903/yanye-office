@@ -3,8 +3,9 @@ import { mkdirSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH } from '../shared/workspace.mjs'
+import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, visiblePages } from '../shared/workspace.mjs'
 import { WorkspaceStore, writeAtomically } from './store.mjs'
+import { FileLibrary, officeExtensions } from './library.mjs'
 
 const directory = fileURLToPath(new URL('../', import.meta.url))
 const assets = join(directory, 'dist')
@@ -25,6 +26,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'yanye', privileges: { standard:
 
 const store = new WorkspaceStore(join(app.getPath('userData'), 'workspace.json'))
 let window
+let library
 let saveTimer
 let closeTimer
 let closing = false
@@ -54,7 +56,22 @@ async function finishClose(snapshot) {
 
   try {
     if (snapshot) store.stage(snapshot)
+    await library.idle()
     await flush()
+    const workspace = await store.load()
+    const dirty = visiblePages(workspace.pages).filter(page => page.disk?.dirty && !page.disk.closeAcknowledged)
+    if (dirty.length) {
+      const result = await dialog.showMessageBox(window, {
+        type: 'question',
+        message: '还有 ' + dirty.length + ' 个办公文件未写入磁盘',
+        detail: '工作区已保留本机草稿。返回编辑可以将更改写回文件：' + dirty.slice(0, 4).map(p => p.disk.name).join('、'),
+        buttons: ['返回编辑', '保留本机草稿并关闭'],
+        defaultId: 0, cancelId: 0,
+      })
+      if (result.response !== 1) return
+      await library.idle()
+      await flush()
+    }
     closeAllowed = true
     window.close()
   } catch (error) {
@@ -97,11 +114,32 @@ function safeFilename(title, extension = 'md') {
   return `${prefix}${base}.${extension}`
 }
 
-const exchangeTypes = new Set(['csv', 'xlsx', 'json', 'svg', 'png', 'jpeg', 'jpg', 'pptx', 'pdf', 'mmd'])
-const binaryTypes = new Set(['xlsx', 'pptx', 'png', 'jpeg', 'jpg', 'pdf'])
+const exchangeTypes = new Set(['csv', 'docx', 'xlsx', 'json', 'svg', 'png', 'jpeg', 'jpg', 'pptx', 'pdf', 'mmd'])
+const binaryTypes = new Set(['docx', 'xlsx', 'pptx', 'png', 'jpeg', 'jpg', 'pdf'])
 const maxFileBytes = 32 * 1024 * 1024
 
 function registerHandlers() {
+  library = new FileLibrary(userData, {
+    async chooseRoot(root) {
+      const result = await dialog.showOpenDialog(window, { title: '选择文件中心的本地文件夹',
+        defaultPath: root || app.getPath('documents'), properties: ['openDirectory', 'createDirectory'] })
+      return result.canceled ? null : result.filePaths[0]
+    },
+    async chooseOpen() {
+      const result = await dialog.showOpenDialog(window, { title: '打开办公文件', properties: ['openFile'],
+        filters: [{ name: '办公文档', extensions: officeExtensions }] })
+      return result.canceled ? null : result.filePaths[0]
+    },
+    async chooseSave(name, extension) {
+      const result = await dialog.showSaveDialog(window, { title: '保存办公文件', defaultPath: name,
+        filters: [{ name: extension.toUpperCase(), extensions: [extension] }] })
+      return result.canceled ? null : result.filePath
+    },
+    trash: path => shell.trashItem(path),
+  })
+  for (const method of ['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup']) {
+    handle('library:' + method, (...args) => library.invoke(method, ...args))
+  }
   handle('workspace:load', async () => ({ workspace: await store.load(), directory: dirname(store.filename) }))
 
   ipcMain.on('workspace:stage', (event, snapshot) => {
@@ -123,7 +161,7 @@ function registerHandlers() {
   handle('workspace:open-folder', () => shell.openPath(dirname(store.filename)))
 
   handle('office:print-pdf', async name => {
-    if (typeof name !== 'string') throw new Error('演示文稿名称无效。')
+    if (typeof name !== 'string') throw new Error('文档名称无效。')
     const result = await dialog.showSaveDialog(window, { title: '导出 PDF',
       defaultPath: safeFilename(basename(name, '.pdf').slice(0, 120), 'pdf'),
       filters: [{ name: 'PDF 文档', extensions: ['pdf'] }] })

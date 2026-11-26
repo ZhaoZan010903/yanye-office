@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownToLine, ChevronRight, CircleAlert, FolderTree, LayoutList, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Star, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, ChevronRight, CircleAlert, FolderOpen, FolderTree, LayoutList, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Save, Star, Trash2, X } from 'lucide-react'
 import {
   addPage, ancestors, canMoveTo, indexPages, makePage, MAX_MARKDOWN_LENGTH, movePage, openPage, pageTitle,
   restorePage, setCollapsed, trashPage, updatePage, visiblePages, MAX_WORKSPACE_BYTES, officeKinds, workspaceBytes,
 } from '../shared/workspace.mjs'
 import { DocumentEditor } from './editor.jsx'
 import { OfficePage } from './office-page.jsx'
+import { FileCenter } from './FileCenter.jsx'
+import { fileTitle, pageExtension } from './office-files.js'
+import { useDiskFiles } from './use-disk-files.js'
 import { Breadcrumbs, Dialog, EmptyWorkspace, IconButton, PageIcon, SearchDialog, Sidebar, TrashDialog } from './workspace-ui.jsx'
 
 const desktop = window.yanye
@@ -25,6 +28,13 @@ export function App() {
   const [focusTitle, setFocusTitle] = useState(null)
   const [navigationOpen, setNavigationOpen] = useState(true)
   const [contextOpen, setContextOpen] = useState(() => window.innerWidth >= 1050)
+  const [screen, setScreen] = useState(() => localStorage.getItem('office-screen') === 'editor' ? 'editor' : 'files')
+  const [tabs,setTabs] = useState(() => {
+    try { const ids = JSON.parse(localStorage.getItem('file-tabs')); return Array.isArray(ids) ? ids : [] }
+    catch { return [] }
+  })
+  const [fileError,setFileError] = useState('')
+  const [chooseNewFile,setChooseNewFile] = useState(false)
   const latest = useRef(null)
   const noticeTimer = useRef(null)
 
@@ -79,11 +89,24 @@ export function App() {
     return true
   }, [notify])
 
+  useEffect(() => { localStorage.setItem('office-screen',screen) }, [screen])
+  useEffect(() => { localStorage.setItem('file-tabs',JSON.stringify(tabs)) }, [tabs])
+
+  function reveal(id) {
+    setScreen('editor')
+    setModal(null)
+    setFileError('')
+    if (latest.current?.pages.find(p => p.id === id)?.disk) setTabs(ids => ids.includes(id) ? ids : [...ids,id])
+  }
+  const files = useDiskFiles({ latest, change, reveal, notify, prompt: setModal })
+  function home() { setScreen('files'); setModal(null); setFileError('') }
+  function handleFileError(error) { setFileError(errorText(error)) }
+
   const create = useCallback((parentId = null, kind = 'note') => {
     const page = makePage({ parentId, kind, title: officeKinds[kind] ? '未命名' + officeKinds[kind] : '' })
     try {
       if (change(current => addPage(current, page))) {
-        setModal(null)
+        reveal(page.id)
         setFocusTitle({ id: page.id })
       }
     } catch (error) {
@@ -102,17 +125,28 @@ export function App() {
 
   useEffect(() => {
     const shortcuts = event => {
-      if (!latest.current || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.isComposing) return
+      if (!latest.current || !(event.ctrlKey || event.metaKey) || event.altKey || event.isComposing) return
       const key = event.key.toLowerCase()
-      if (!['k', 'n', 's'].includes(key)) return
+      if (!['k', 'n', 's', 'o'].includes(key) || (event.shiftKey && key !== 's')) return
       event.preventDefault()
+      if (document.querySelector('dialog[open]') && key !== 'k') return
       if (key === 'k') setModal(current => current?.type === 'search' ? null : { type: 'search' })
-      if (key === 'n') setModal({ type: 'new', parentId: null })
-      if (key === 's') void save()
+      if (key === 'n') {
+        if (screen === 'files' || latest.current.pages.find(p=>p.id===latest.current.activeId)?.disk) {
+          home(); setChooseNewFile(true)
+        } else setModal({ type: 'new', parentId: null })
+      }
+      if (key === 'o') files.openFile(() => desktop.library.chooseOpen()).catch(handleFileError)
+      if (key === 's' && screen === 'editor') {
+        const target = latest.current.pages.find(p=>p.id===latest.current.activeId)
+        if (target && pageExtension(target) && (target.disk || officeKinds[target.kind] || event.shiftKey)) {
+          files.saveFile(target.id,event.shiftKey).catch(handleFileError)
+        } else void save()
+      }
     }
     window.addEventListener('keydown', shortcuts, true)
     return () => window.removeEventListener('keydown', shortcuts, true)
-  }, [create, save])
+  }, [files, save, screen])
 
   const allPages = workspace?.pages
   const byId = useMemo(() => indexPages(allPages ?? []), [allPages])
@@ -122,14 +156,47 @@ export function App() {
 
   function open(id) {
     change(current => openPage(current, id))
+    reveal(id)
+  }
+
+  function closeTab(id, keepDraft = false) {
+    if (!keepDraft && latest.current.pages.find(p=>p.id===id)?.disk?.dirty) { setModal({type:'close-tab',id}); return }
+    if (keepDraft) change(ws => {
+      const saved = ws.pages.find(p=>p.id===id)
+      return saved?.disk?.dirty ? updatePage(ws,id,{disk:{...saved.disk,closeAcknowledged:true}}) : ws
+    })
     setModal(null)
+    const remaining = tabs.filter(item => item !== id && pages.some(p => p.id === item))
+    setTabs(remaining)
+    if (id === page?.id && screen === 'editor') {
+      if (remaining.length) open(remaining.at(-1))
+      else home()
+    }
+  }
+
+  async function syncFileNames() {
+    const requested = new Set(latest.current.pages.filter(p => p.disk).map(p => p.disk.id))
+    const recent = await desktop.library.describe([...requested])
+    const names = new Map(recent.map(file => [file.id, file]))
+    change(ws => {
+      let next = ws
+      for (const p of ws.pages) {
+        if (!p.disk || !requested.has(p.disk.id)) continue
+        const file = names.get(p.disk?.id)
+        if (!file) next = updatePage(next,p.id,{disk:null})
+        else if (file.name !== p.disk.name) next = updatePage(next,p.id,{
+          title:fileTitle(file.name,file.extension).slice(0,120), disk:{...p.disk,name:file.name} })
+      }
+      return next
+    })
   }
 
   async function importMarkdown() {
     try {
       const source = await desktop.importMarkdown()
       if (!source) return
-      if (change(current => addPage(current, makePage(source)))) notify('已导入 Markdown')
+      const imported = makePage(source)
+      if (change(current => addPage(current, imported))) { reveal(imported.id); notify('已导入 Markdown') }
     } catch (error) {
       notify(errorText(error))
     }
@@ -151,7 +218,11 @@ export function App() {
       notify('页面已达到长度上限。')
       return false
     }
-    return change(current => updatePage(current, id, fields))
+    return change(current => {
+      const target = current.pages.find(p => p.id === id)
+      const edited = target?.disk && ['content','markdown'].some(key => Object.hasOwn(fields,key) && fields[key] !== target[key])
+      return updatePage(current,id,edited && (!target.disk.dirty || target.disk.closeAcknowledged) ? { ...fields, disk:{...target.disk,dirty:true,closeAcknowledged:false} } : fields)
+    })
   }
 
   function favorite(target) {
@@ -161,6 +232,7 @@ export function App() {
   const closeModal = () => setModal(null)
   const pageMenu = id => setModal({ type: 'page', id })
   const actions = {
+    library: home, inLibrary: screen === 'files',
     create: (parentId = null) => setModal({ type: 'new', parentId }), open, pageMenu, importMarkdown,
     collapse: (id, collapsed) => change(current => setCollapsed(current, id, collapsed)),
     search: () => setModal({ type: 'search' }),
@@ -182,21 +254,34 @@ export function App() {
     {fatal && <button className="button primary" type="button" onClick={load}>重试</button>}
   </div>
 
+  const diskState = page?.disk ? { ...saveState,label:page.disk.dirty ? '草稿已保存 · 文件有未写入的修改' : '文件已保存到磁盘' } : saveState
+  const diskTabs = tabs.map(id => pages.find(p=>p.id===id && p.disk)).filter(Boolean)
   return <div className={`application ${navigationOpen ? '' : 'navigation-hidden'}`}>
-    {navigationOpen && <Sidebar pages={pages} workspace={workspace} activeId={workspace.activeId} directory={directory} actions={actions} />}
+    {navigationOpen && <Sidebar pages={pages} workspace={workspace} activeId={screen === 'editor' ? workspace.activeId : null} directory={directory} actions={actions} />}
     <main className="main-pane">
       <header className="window-bar">
         <IconButton className="window-control" icon={navigationOpen ? PanelLeftClose : PanelLeftOpen} label={navigationOpen ? '收起侧栏' : '显示侧栏'}
           onClick={() => setNavigationOpen(value => !value)} />
         <span className="bar-divider" />
-        <Breadcrumbs page={page} byId={byId} onOpen={open} />
+        {screen === 'files' ? <span className="breadcrumb-empty">本机 / 文件中心</span> : <>
+          <IconButton label="返回文件中心" icon={FolderOpen} onClick={home}/><Breadcrumbs page={page} byId={byId} onOpen={open} />
+          {pageExtension(page) && <div className="disk-actions">
+            <button disabled={files.busy} onClick={() => files.saveFile(page.id).catch(handleFileError)} title="保存到磁盘 (Ctrl+S)"><Save size={14}/>保存文件</button>
+            <button disabled={files.busy} onClick={() => files.saveFile(page.id,true).catch(handleFileError)} title="Ctrl+Shift+S">另存为</button>
+          </div>}</>}
         <div className="window-drag-spacer" />
       </header>
-      {page && officeKinds[page.kind] ? <OfficePage key={page.id} page={page} pages={pages}
-        focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={saveState} onSave={save}
+      {diskTabs.length > 0 && <nav className="disk-tabs" aria-label="打开的文件">{diskTabs.map(p =>
+        <div className="disk-tab" key={p.id} aria-current={p.id===page?.id && screen==='editor' ? 'page' : undefined}>
+          <button onClick={() => open(p.id)} title={p.disk.name}><PageIcon page={p} size={14}/><span>{p.disk.name}</span>{p.disk.dirty && <i className="disk-tab-dot" title="文件有未写入的修改"/>}</button>
+          <button className="close-tab" aria-label={'关闭标签 '+p.disk.name} onClick={() => closeTab(p.id)}><X size={12}/></button>
+        </div>)}</nav>}
+      {fileError && <div className="files-feedback" role="alert">{fileError}<IconButton icon={X} label="关闭文件错误" onClick={()=>setFileError('')}/></div>}
+      {screen === 'files' ? <FileCenter files={files} onMutate={syncFileNames} chooseNew={chooseNewFile} onChosen={()=>setChooseNewFile(false)}/> : page && officeKinds[page.kind] ? <OfficePage key={page.id} page={page} pages={pages}
+        focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={diskState} onSave={save}
         onEdit={fields => edit(page.id, fields)} onMenu={() => pageMenu(page.id)} onFavorite={() => favorite(page)} />
         : page ? <DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}
-        focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={saveState} onSave={save}
+        focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={diskState} onSave={save}
         contextOpen={contextOpen} onContextToggle={() => setContextOpen(value => !value)}
         onChange={fields => edit(page.id, fields)} onOpenPage={open} onCreateChild={() => create(page.id)}
         onFavorite={() => favorite(page)} onExport={() => exportMarkdown(page.id)} onMenu={() => pageMenu(page.id)}
@@ -204,21 +289,38 @@ export function App() {
         : <EmptyWorkspace onCreate={() => actions.create()} />}
     </main>
 
+    {modal?.type === 'close-tab' && <Dialog title="文件还有未写入的修改" onClose={closeModal}>
+      <p>本机工作区保留了修改。在侧栏重新打开这份草稿后，仍可保存到文件。</p>
+      <div className="files-dialog-actions"><button className="button" onClick={closeModal}>继续编辑</button>
+        <button className="button" onClick={()=>closeTab(modal.id,true)}>保留草稿并关闭</button>
+        <button className="button primary" onClick={async()=>{const id=modal.id;closeModal();try { if (await files.saveFile(id)) closeTab(id,true) } catch(e) { handleFileError(e) }}}>保存文件</button></div>
+    </Dialog>}
+    {modal?.type === 'confirm-write' && <Dialog title="保存到原 Office 文件" onClose={closeModal}>
+      <p>砚页会按支持的格式重新生成文件。修订、宏、复杂图形或特殊版式可能发生变化。覆盖前会在本地用户目录的 file-backups 中备份上一次的文件。</p>
+      <div className="files-dialog-actions"><button className="button" onClick={closeModal}>取消</button>
+        <button className="button" onClick={() => {closeModal();files.saveFile(modal.id,true).catch(handleFileError)}}>另存副本</button>
+        <button className="button primary" onClick={() => {closeModal();files.saveFile(modal.id,false,true).catch(handleFileError)}}>备份并保存原文件</button></div>
+    </Dialog>}
     {modal?.type === 'new' && <Dialog title="新建本地页面" onClose={closeModal}>
       <div className="action-list">{Object.entries({note: 'Markdown 文档', ...officeKinds}).map(([kind, label]) =>
         <button type="button" key={kind} onClick={() => create(modal.parentId, kind)}><PageIcon page={{ kind }} />{label}</button>)}</div>
     </Dialog>}
     {modal?.type === 'search' && <SearchDialog pages={pages} byId={byId} onSelect={open} onClose={closeModal} />}
     {modal?.type === 'trash' && <TrashDialog pages={allPages} byId={byId} onClose={closeModal} onRestore={id => {
-      change(current => restorePage(current, id)); closeModal(); notify('页面已恢复')
+      change(current => restorePage(current, id)); reveal(id); notify('页面已恢复')
     }} />}
     {modal?.type === 'page' && modalPage && <Dialog key="page-actions" title="页面操作" onClose={closeModal}>
       <div className="action-title"><PageIcon page={modalPage} />{pageTitle(modalPage)}</div>
       <div className="action-list">
         <button type="button" onClick={() => actions.create(modalPage.id)}><Plus size={17} />新建子页面</button>
-        <button type="button" onClick={() => { open(modalPage.id); setFocusTitle({ id: modalPage.id }) }}><Pencil size={17} />重命名</button>
+        {!modalPage.disk && <button type="button" onClick={() => { open(modalPage.id); setFocusTitle({ id: modalPage.id }) }}><Pencil size={17} />重命名</button>}
         <button type="button" onClick={() => { favorite(modalPage); closeModal() }}><Star size={17} />{modalPage.favorite ? '取消收藏' : '收藏页面'}</button>
         <button type="button" onClick={() => setModal({ type: 'move', id: modalPage.id })}><FolderTree size={17} />移动到</button>
+        {modalPage.disk && <button type="button" onClick={async () => {
+          closeModal()
+          try { if (await desktop.library.exportBackup(modalPage.disk.id)) notify('已另存上次覆盖前的原件。') }
+          catch (error) { handleFileError(error) }
+        }}><ArrowDownToLine size={17}/>另存上次原件</button>}
         {!officeKinds[modalPage.kind] && <button type="button" onClick={() => exportMarkdown(modalPage.id)}><ArrowDownToLine size={17} />导出 Markdown</button>}
         <button type="button" className="danger-action" onClick={() => {
           change(current => trashPage(current, modalPage.id)); closeModal(); notify('页面已移到回收站')

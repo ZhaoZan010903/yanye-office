@@ -18,6 +18,17 @@ export function newSlide(overrides = {}) {
 const firstSlide = { id: 'first', layout: 'cover', title: '', body: '', side: '', notes: '' }
 const blankDeck = { theme: 'paper', slides: [firstSlide] }
 
+export function textBox(values = {}) {
+  const bounded = (number, fallback, min, max) => Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback
+  const w = bounded(values.w, .38, .04, 1), h = bounded(values.h, .15, .04, 1)
+  return {
+    id: values.id || crypto.randomUUID(), text: String(values.text ?? ''),
+    x: bounded(values.x ?? .12, 0, 0, 1-w), y: bounded(values.y ?? .45, 0, 0, 1-h), w, h,
+    color: /^[0-9A-F]{6}$/i.test(values.color) ? values.color.toUpperCase() : '37352F',
+    fontSize: bounded(values.fontSize, 22, 6, 144),
+  }
+}
+
 export function readDeck(value) {
   return value && Array.isArray(value.slides) && value.slides.length ? value : blankDeck
 }

@@ -50,3 +50,20 @@
 .sheet-bar-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-bar-row i { display: block; height: 8px; background: #788d93; }
 .sheet-bar-row b { font-weight: 500; }
+.sheet-format, .sheet-functions { display:flex; flex-wrap:wrap; align-items:center; gap:5px 8px; padding:4px 12px; border-bottom:1px solid #e9e7e4; font-size:12px; }
+.sheet-format { min-height:34px; }
+.sheet-format button { display:inline-flex; align-items:center; padding:4px 6px; }
+.sheet-format button:disabled { opacity:.42; cursor:default; }
+.sheet-format label { display:inline-flex; align-items:center; gap:4px; }
+.sheet-format input[type=color] { width:21px; height:20px; padding:1px; border:1px solid #e9e7e4; background:#fff; cursor:pointer; }
+.sheet-format select { padding:3px; color:inherit; font:inherit; border:1px solid #e9e7e4; border-radius:4px; background:#fff; }
+.sheet-functions { background:#f7f6f3; padding-block:8px; }
+.sheet-functions code { background:#fff; padding:2px 4px; }
+.sheet-functions span { width:100%; color:#66645f; }
+.sheet-menu-list small { display:block; padding:4px 8px; width:175px; color:#686761; }
+.sheet-formula output { width:auto; min-width:50px; padding-right:7px; }
+.sheet-scroll td { user-select:none; }
+.sheet-scroll td input { user-select:text; }
+.sheet-scroll tbody :is(td,th) { height:var(--sheet-row-height,30px); }
+.sheet-scroll tbody th, .sheet-scroll td span { line-height:calc(var(--sheet-row-height,30px) - 1px); max-height:calc(var(--sheet-row-height,30px) - 1px); overflow:hidden; }
+.sheet-scroll td.sheet-highlight:not(.sheet-selected)::after { content:''; position:absolute; inset:0; background:rgba(49,118,138,.11); pointer-events:none; }

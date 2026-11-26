@@ -23,7 +23,7 @@ function SaveState({ state, onSave }) {
   const pending = state.state === 'pending'
   const Icon = pending ? LoaderCircle : Check
   return <span className="save-state" aria-live="polite">
-    <Icon size={14} className={pending ? 'spinning' : ''} />{pending ? '正在保存' : '已保存'}
+    <Icon size={14} className={pending ? 'spinning' : ''} />{pending ? '正在保存草稿' : state.label || '已保存'}
   </span>
 }
 
@@ -221,7 +221,7 @@ export function DocumentEditor({
       <div className="document-scroll">
         <div className="document-sheet">
           <div className={`page-mark page-mark-${page.kind}`}><PageIcon page={page} size={25} /></div>
-          <input ref={titleInput} spellCheck={false} className="document-title" aria-label="页面标题" value={page.title}
+          <input ref={titleInput} spellCheck={false} className="document-title" aria-label="页面标题" value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
             placeholder={pageTitle(page)} maxLength={MAX_TITLE_LENGTH} onChange={event => onChange({ title: event.target.value })}
             onKeyDown={event => {
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return

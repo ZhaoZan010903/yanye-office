@@ -1,4 +1,4 @@
-import { newSlide, slideBoxes, slideThemes } from './slides-model.js'
+import { newSlide, slideBoxes, slideThemes, textBox } from './slides-model.js'
 
 const W = 40 / 3
 const H = 7.5
@@ -35,6 +35,10 @@ export async function exportPptx(deck, name) {
       slide.addImage({ data: image.data, x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h, altText: image.name || '插图' })
     }
     if (item.notes) slide.addNotes(item.notes)
+    for (const box of item.textBoxes || []) {
+      slide.addText(box.text, { ...baseText, ...pageBox(box), fontSize: box.fontSize, color: box.color,
+        fit: undefined, objectName: 'YanYe text box' })
+    }
   }
   return file.write({ outputType: 'base64', compression: true })
 }
@@ -109,6 +113,9 @@ export async function importPptx(base64) {
   }
   const pres = 'ppt/presentation.xml'
   const presentation = await xml(pres)
+  const size = nodes(presentation, 'sldSz')[0]
+  const slideWidth = Number(size?.getAttribute('cx')) || W * 914400
+  const slideHeight = Number(size?.getAttribute('cy')) || H * 914400
   const catalog = relationships(await xml(relsPath(pres)), pres)
   const slides = []
   let theme = 'paper'
@@ -119,11 +126,26 @@ export async function importPptx(base64) {
     const backgroundColor = nodes(content, 'bg')[0]?.getElementsByTagNameNS('*', 'srgbClr')[0]?.getAttribute('val')
     if (!slides.length) theme = Object.keys(slideThemes).find(key => slideThemes[key].background === backgroundColor) || 'paper'
     const related = file.file(relsPath(path)) ? relationships(await xml(relsPath(path)), path) : new Map()
-    const shapes = nodes(content, 'sp').map(sp => ({
+    const objects = nodes(content, 'sp').map(sp => ({
+      sp,
       kind: nodes(sp, 'ph')[0]?.getAttribute('type'),
       name: nodes(sp, 'cNvPr')[0]?.getAttribute('name') || '',
       text: shapeText(sp),
     }))
+    const boxes = []
+    const shapes = objects.filter(({sp, name, text}) => {
+      const free = name === 'YanYe text box' || (!name.startsWith('YanYe ') && !nodes(sp,'ph').length &&
+        ['1','true'].includes(nodes(sp,'cNvSpPr')[0]?.getAttribute('txBox')))
+      if (!free || sp.parentNode?.localName === 'grpSp') return true
+      const xf = nodes(sp,'xfrm')[0], off = xf && nodes(xf,'off')[0], ext = xf && nodes(xf,'ext')[0]
+      if (!off || !ext) return true
+      const props = nodes(sp,'rPr')[0] || nodes(sp,'defRPr')[0] || nodes(sp,'endParaRPr')[0]
+      boxes.push(textBox({ text, x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
+        w: Number(ext.getAttribute('cx'))/slideWidth, h: Number(ext.getAttribute('cy'))/slideHeight,
+        fontSize: Number(props?.getAttribute('sz')) / 100 || 22,
+        color: (props && nodes(props,'srgbClr')[0]?.getAttribute('val')) || slideThemes[theme].ink }))
+      return false
+    })
     const title = shapes.find(s => /^YanYe (cover|text|columns|image) title$/.test(s.name))
       || shapes.find(s => ['ctrTitle', 'title'].includes(s.kind)) || shapes.find(s => s.text.trim())
     const layout = /^YanYe (cover|text|columns|image) title$/.exec(title?.name || '')?.[1] || 'text'
@@ -131,6 +153,7 @@ export async function importPptx(base64) {
     const body = rest.find(s => s.name === 'YanYe ' + layout + ' body')
     const side = rest.find(s => s.name === 'YanYe columns side')
     const item = newSlide({ layout, title: title?.text || '', body: body ? body.text : rest.map(s => s.text).filter(Boolean).join('\n\n'), side: side?.text || '' })
+    if (boxes.length) item.textBoxes = boxes
     for (const pic of nodes(content, 'pic')) {
       const id = nodes(pic, 'blip')[0]?.getAttributeNS(ns, 'embed')
       const imagePath = related.get(id)?.path

@@ -6,7 +6,7 @@ import {
 import { ancestors, pageTitle } from '../shared/workspace.mjs'
 
 const pageIcons = { desk: NotebookPen, journal: FileText, book: BookOpen, inbox: Inbox, collection: Library, note: File,
-  spreadsheet: Sheet, database: Database, canvas: Workflow, presentation: Presentation }
+  word: FileText, spreadsheet: Sheet, database: Database, canvas: Workflow, presentation: Presentation }
 
 export function PageIcon({ page, size = 16 }) {
   const Icon = pageIcons[page?.kind] ?? File
@@ -67,6 +67,9 @@ export function Sidebar({ pages, workspace, activeId, directory, actions }) {
 
   return <aside className="sidebar" aria-label="工作区导航">
     <Brand />
+    <button type="button" className="sidebar-file-center" onClick={actions.library} aria-pressed={actions.inLibrary}>
+      <FolderOpen size={17} /><span>文件中心</span>
+    </button>
     <button type="button" className="sidebar-search" onClick={actions.search}>
       <Search size={17} aria-hidden="true" /><span>搜索工作区</span><kbd>Ctrl K</kbd>
     </button>

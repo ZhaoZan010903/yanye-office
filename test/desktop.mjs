@@ -15,12 +15,13 @@ const profile = join(temp, 'profile')
 const appErrors = []
 let application
 
-async function start() {
+async function start(firstLaunch = false) {
   application = await _electron.launch({ executablePath: exe, args, env: { ...process.env, YANYE_PROFILE: profile }, timeout: 22_000 })
   const page = await application.firstWindow({ timeout: 12_000 })
   await page.context().setOffline(true)
   page.setDefaultTimeout(7_000)
   page.on('pageerror', error => appErrors.push(error.message))
+  if (firstLaunch) await page.getByRole('button',{name:'写作工作台',exact:true}).click()
   await page.getByRole('textbox', { name: '页面标题' }).waitFor()
   return page
 }
@@ -33,7 +34,7 @@ async function close() {
 }
 
 try {
-  let page = await start()
+  let page = await start(true)
   const title = () => page.getByRole('textbox', { name: '页面标题' })
   const body = () => page.getByRole('textbox', { name: '正文编辑器' })
   const source = () => page.getByRole('textbox', { name: 'Markdown 源码' })

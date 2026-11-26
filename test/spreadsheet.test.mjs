@@ -1,10 +1,58 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  address, csvText, delimitedText, emptyWorkbook, evaluator, fillFrom, formatted, location, newSheet, parseDelimited,
+  address, bounds, changeCellStyle, copyRange, csvText, delimitedText, emptyWorkbook, evaluator, fillFrom, formatted, location, mergeRange, newSheet, parseDelimited, pasteRange, unmergeRange,
   removeSheet, renameSheet, shiftGrid, writeRange,
 } from '../src/modules/spreadsheet.js'
 import { appendSheets, readXlsx, writeXlsx } from '../src/modules/spreadsheet-xlsx.js'
+
+test('conditional sums, comparisons, escaped literals and lazy IF branches', () => {
+  const book=emptyWorkbook(), sheet=book.sheets[0]
+  sheet.cells = { A1:'材料', A2:'材料费', A3:'服务', B1:'3', B2:'7', B3:'-2', B4:'未定',
+    C1:'=IF(SUM(B1:B3)>5,"可""用",1/0)', C2:'=IF(FALSE,C2,9)',
+    C3:'=SUMIF(A1:A3,"材料*",B1:B3)', C4:'=COUNTIF(B1:B4,">0")', C5:'=COUNTA(B1:B8)',
+    C6:'=COUNTIF(B1:B4,">="&B1)', C7:'=IF(B3<0,"亏","盈")' }
+  const value=evaluator(book)
+  assert.deepEqual(Array.from({length:7},(_,i)=>value(sheet,'C'+(i+1))), ['可"用',9,10,2,4,2,'亏'])
+})
+
+test('rectangular paste translates formulas, preserves relative and absolute addresses and formats', () => {
+  let sheet=writeRange(newSheet(),0,0,[['3','=A1+$A$1'],['4','=A2']])
+  sheet=changeCellStyle(sheet,[0,1],0,1,{bold:true,fill:'#FEEDAC',numberFormat:'number'})
+  const result=pasteRange(sheet,3,2,copyRange(sheet,[0,1],0,1))
+  assert.equal(result.cells.D4,'=C4+$A$1')
+  assert.equal(result.cells.D5,'=C5')
+  assert.deepEqual(result.styles.C4,{bold:true,fill:'#FEEDAC'})
+  assert.equal(result.formats.D5,'number')
+  assert.equal(sheet.cells.D4,undefined)
+})
+
+test('merging checks data and overlap, structured edits track ranges and XLSX retains cell styling', async () => {
+  const book=emptyWorkbook()
+  let sheet=changeCellStyle(book.sheets[0],[1],1,1,{bold:true,italic:true,font:'宋体',size:18,color:'#224466',fill:'#DDFFFF',align:'center'})
+  sheet.widths={1:24.5}
+  sheet.heights={1:44}
+  sheet=writeRange(sheet,1,1,[['标题','保留']])
+  const box=bounds({row:1,col:1},{row:3,col:3})
+  assert.throws(()=>mergeRange(sheet,box),/含有数据/)
+  sheet=mergeRange(writeRange(sheet,1,2,[['']]),box)
+  assert.throws(()=>mergeRange(sheet,box),/已有合并/)
+  assert.throws(()=>writeRange(sheet,2,3,[['隐藏的值']]),/已合并/)
+  assert.equal(unmergeRange(sheet,box).merges.length,0)
+  book.sheets[0]=sheet
+  const changed=shiftGrid(book,sheet.id,'row',0,1)
+  assert.deepEqual(changed.sheets[0].merges,[{top:2,left:1,bottom:4,right:3}])
+  changed.sheets[0]=changeCellStyle(changed.sheets[0],[7],7,7,{fill:'#112233',numberFormat:'percent'})
+  changed.sheets[0].freezeHeader=true
+  const [loaded]=await readXlsx(await writeXlsx(changed))
+  assert.deepEqual(loaded.merges,changed.sheets[0].merges)
+  assert.deepEqual(loaded.styles.B3,sheet.styles.B2)
+  assert.equal(loaded.styles.H8.fill,'#112233')
+  assert.equal(loaded.widths[1],24.5)
+  assert.equal(loaded.heights[2],44)
+  assert.equal(loaded.formats.H8,'percent')
+  assert.equal(loaded.freezeHeader,true)
+})
 
 test('formulas recalculate dependencies, quoted sheets, ranges and cycle errors', () => {
   const book = emptyWorkbook(), sheet = book.sheets[0], costs = newSheet("投入'成本")

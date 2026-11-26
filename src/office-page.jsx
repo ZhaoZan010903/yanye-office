@@ -5,6 +5,7 @@ import { IconButton, PageIcon } from './workspace-ui.jsx'
 import './office.css'
 
 const editors = {
+  word: lazy(() => import('./modules/Word.jsx')),
   spreadsheet: lazy(() => import('./modules/Spreadsheet.jsx')),
   database: lazy(() => import('./modules/Database.jsx')),
   canvas: lazy(() => import('./modules/Canvas.jsx')),
@@ -48,7 +49,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
   return <section className="office-page" aria-label={officeKinds[page.kind]}>
     <header className="office-heading">
       <PageIcon page={page} size={24} />
-      <input ref={titleRef} aria-label="页面标题" maxLength={MAX_TITLE_LENGTH} value={page.title}
+      <input ref={titleRef} aria-label="页面标题" maxLength={MAX_TITLE_LENGTH} value={page.title} readOnly={Boolean(page.disk)} title={page.disk ? '文件名称可在文件中心修改' : undefined}
         placeholder="未命名页面" onChange={e => onEdit({ title: e.target.value })} />
       <IconButton icon={Star} label={page.favorite ? '取消收藏' : '收藏页面'} onClick={onFavorite} aria-pressed={page.favorite} />
       <IconButton icon={MoreHorizontal} label="页面操作" onClick={onMenu} />
@@ -65,7 +66,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
     <footer className="status-bar">
       {saveState.state === 'error'
         ? <button type="button" className="save-error" onClick={onSave} title={saveState.message}>保存失败，点击重试</button>
-        : <span className="save-state" role="status"><Check size={13} />{saveState.state === 'pending' ? '正在保存' : '已保存到本机'}</span>}
+        : <span className="save-state" role="status"><Check size={13} />{saveState.state === 'pending' ? '正在保存草稿' : saveState.label || '已保存到本机'}</span>}
       <span>{officeKinds[page.kind]}</span>
     </footer>
   </section>

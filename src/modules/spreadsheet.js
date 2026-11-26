@@ -22,6 +22,51 @@ export function newSheet(name = '工作表1', id = crypto.randomUUID()) {
   return { id, name, rows: 24, cols: 8, cells: {} }
 }
 
+export function bounds(a, b = a) {
+  return { top: Math.min(a.row,b.row), bottom: Math.max(a.row,b.row), left: Math.min(a.col,b.col), right: Math.max(a.col,b.col) }
+}
+
+export const inRect = (box,row,col) => box.top <= row && row <= box.bottom && box.left <= col && col <= box.right
+export const intersects = (a,b) => a.top <= b.bottom && b.top <= a.bottom && a.left <= b.right && b.left <= a.right
+export const findMerge = (sheet,row,col) => sheet.merges?.find(box => inRect(box,row,col))
+export const rangeName = box => {
+  const first = address(box.top,box.left), last = address(box.bottom,box.right)
+  return first === last ? first : first + ':' + last
+}
+
+export function mergeRange(sheet, box) {
+  if (box.top === box.bottom && box.left === box.right) throw new Error('请先选择至少两个单元格。')
+  if (sheet.merges?.some(other => intersects(other,box))) throw new Error('选区中已有合并单元格，请先取消合并。')
+  for (const ref of Object.keys(sheet.cells)) {
+    const {row,col} = location(ref)
+    if (inRect(box,row,col) && (row !== box.top || col !== box.left)) {
+      throw new Error('左上角以外的单元格含有数据。请先移出这些内容，再合并。')
+    }
+  }
+  return {...sheet, merges:[...(sheet.merges ?? []),box]}
+}
+
+export function unmergeRange(sheet, box) {
+  return {...sheet, merges:(sheet.merges ?? []).filter(other => !intersects(other,box))}
+}
+
+export function changeCellStyle(sheet, rows, left, right, patch) {
+  const styles = { ...sheet.styles }, formats = { ...sheet.formats }
+  for (const row of rows) for (let col=left; col<=right; col++) {
+    const ref = address(row,col), style = { ...styles[ref] }
+    for (const [key,value] of Object.entries(patch)) {
+      if (key === 'numberFormat') {
+        if (value) formats[ref] = value
+        else delete formats[ref]
+      } else if (value) style[key] = value
+      else delete style[key]
+    }
+    if (Object.keys(style).length) styles[ref] = style
+    else delete styles[ref]
+  }
+  return { ...sheet, styles, formats }
+}
+
 export function emptyWorkbook() {
   return { sheets: [newSheet('工作表1', 'sheet-1')], active: 'sheet-1' }
 }
@@ -87,24 +132,43 @@ export function removeSheet(book, id) {
   return { ...book, sheets, active: book.active === id ? sheets[0].id : book.active }
 }
 
-export function fillFrom(sheet, row, col, direction) {
-  const dr = direction === 'down' ? 1 : 0, dc = direction === 'right' ? 1 : 0
-  if (row < dr || col < dc) return sheet
-  const source = address(row-dr,col-dc), dest = address(row,col)
+function translateFormula(raw, dr, dc) {
   function offset(ref) {
     const p = location(ref)
     const r = p.row + (p.absRow ? 0 : dr), c = p.col + (p.absCol ? 0 : dc)
-    return r >= LIMITS.rows || c >= LIMITS.cols ? null : p.absCol + columnName(c) + p.absRow + (r+1)
+    return r < 0 || c < 0 || r >= LIMITS.rows || c >= LIMITS.cols ? null : p.absCol + columnName(c) + p.absRow + (r+1)
   }
-  const raw = mapReferences(sheet.cells[source] ?? '', (_,name,start,end) => {
+  return mapReferences(raw, (_,name,start,end) => {
     const first = offset(start), last = end && offset(end)
     if (!first || (end && !last)) return '#REF!'
     return (name ? quoteName(name) : '') + first + (last ? ':'+last : '')
   })
-  const formats = { ...sheet.formats }
-  if (formats[source]) formats[dest] = formats[source]
-  else delete formats[dest]
-  return { ...writeRange(sheet,row,col,[[raw]]),formats }
+}
+
+export function copyRange(sheet, rows, left, right) {
+  return rows.map(row => Array.from({length:right-left+1},(_,i) => {
+    const col=left+i, ref=address(row,col)
+    return {row,col,raw:sheet.cells[ref] ?? '',style:sheet.styles?.[ref],format:sheet.formats?.[ref]}
+  }))
+}
+
+export function pasteRange(sheet, row, col, clipboard) {
+  const formats = {...sheet.formats}, styles = {...sheet.styles}
+  const matrix = clipboard.map((line,i) => line.map((cell,j) => {
+    const ref = address(row+i,col+j)
+    if (cell.format) formats[ref]=cell.format
+    else delete formats[ref]
+    if (cell.style) styles[ref]=cell.style
+    else delete styles[ref]
+    return translateFormula(cell.raw,row+i-cell.row,col+j-cell.col)
+  }))
+  return {...writeRange(sheet,row,col,matrix),formats,styles}
+}
+
+export function fillFrom(sheet, row, col, direction) {
+  const dr = direction === 'down' ? 1 : 0, dc = direction === 'right' ? 1 : 0
+  if (row < dr || col < dc) return sheet
+  return pasteRange(sheet,row,col,copyRange(sheet,[row-dr],col-dc,col-dc))
 }
 
 const formats = {
@@ -112,7 +176,8 @@ const formats = {
   currency: new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY'}),
   percent: new Intl.NumberFormat('zh-CN',{style:'percent',maximumFractionDigits:2}),
 }
-export const formatted = (value,style) => typeof value === 'number' && Object.hasOwn(formats,style) ? formats[style].format(value) : value
+export const formatted = (value,style) => typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') :
+  typeof value === 'number' && Object.hasOwn(formats,style) ? formats[style].format(value) : value
 
 export function shiftGrid(book, id, axis, index, delta) {
   const target = book.sheets.find(sheet => sheet.id === id)
@@ -143,14 +208,41 @@ export function shiftGrid(book, id, axis, index, delta) {
   }).map(sheet => {
     if (sheet.id !== id) return sheet
     const shifted = { ...sheet, [size]: sheet[size] + delta }
-    if (sheet.formats) {
-      shifted.formats = {}
-      for (const [ref,format] of Object.entries(sheet.formats)) {
+    for (const field of ['formats','styles']) {
+      if (!sheet[field]) continue
+      shifted[field] = {}
+      for (const [ref,format] of Object.entries(sheet[field])) {
         const next = moved(ref)
-        if (next) shifted.formats[next] = format
+        if (next) shifted[field][next] = format
+      }
+    }
+    if (sheet.merges) {
+      const start = axis === 'row' ? 'top' : 'left', end = axis === 'row' ? 'bottom' : 'right'
+      shifted.merges = sheet.merges.flatMap(box => {
+        const next = { ...box }
+        if (delta === -1 && box[start] === index && box[end] === index) return []
+        if (box[start] > index || (delta === 1 && box[start] === index)) next[start] += delta
+        if (box[end] >= index) next[end] += delta
+        return next.top === next.bottom && next.left === next.right ? [] : [next]
+      })
+    }
+    if (axis === 'row' && sheet.heights) {
+      shifted.heights = {}
+      for (const [key,height] of Object.entries(sheet.heights)) {
+        const row=Number(key)
+        if (delta===-1 && row===index) continue
+        shifted.heights[row>=index ? row+delta : row]=height
       }
     }
     if (axis === 'col') {
+      if (sheet.widths) {
+        shifted.widths = {}
+        for (const [key,width] of Object.entries(sheet.widths)) {
+          const column=Number(key)
+          if (delta===-1 && column===index) continue
+          shifted.widths[column>=index ? column+delta : column]=width
+        }
+      }
       for (const name of ['sort','chart']) {
         const config = sheet[name]
         if (!config || config.col < index) continue
@@ -173,11 +265,15 @@ function tokenize(formula) {
     const ref = refToken.exec(tail)
     const number = /^(?:\d*\.\d+|\d+\.?\d*)(?:e[+-]?\d+)?/i.exec(tail)
     const name = /^[a-z_][a-z\d_.]*/i.exec(tail)
+    const literal = /^"(?:[^"]|"")*"/.exec(tail)
+    const comparison = /^(?:<>|<=|>=|[<>=])/.exec(tail)
     let token
     if (ref) token = { type: 'ref', sheet: sheetOf(ref[1], ref[2]), ref: ref[3], text: ref[0] }
     else if (number) token = { type: 'number', text: number[0] }
     else if (name) token = { type: 'name', text: name[0] }
-    else if ('+-*/^(),:'.includes(tail[0])) token = { type: tail[0], text: tail[0] }
+    else if (literal) token = { type: 'string', text: literal[0] }
+    else if (comparison) token = { type:'comparison', text:comparison[0] }
+    else if ('+-*/^(),:&'.includes(tail[0])) token = { type: tail[0], text: tail[0] }
     else fail(tail.startsWith('#REF!') ? '#REF!' : '#VALUE!')
     tokens.push(token)
     offset += token.text.length
@@ -188,8 +284,54 @@ function tokenize(formula) {
 
 function numberOf(value) {
   if (typeof value === 'number') return value
+  if (typeof value === 'boolean') return Number(value)
+  if (Array.isArray(value)) fail('#VALUE!')
   if (value === null || value === '') return 0
   return isNumberText(value) ? Number(value) : fail('#VALUE!')
+}
+
+function compare(left, right, op) {
+  if (left == null) left = typeof right === 'string' ? '' : 0
+  if (right == null) right = typeof left === 'string' ? '' : 0
+  if (typeof left === 'string') left = left.toLowerCase()
+  if (typeof right === 'string') right = right.toLowerCase()
+  const rank = value => typeof value === 'number' ? 0 : typeof value === 'string' ? 1 : 2
+  const difference = rank(left)-rank(right) || (left < right ? -1 : left > right ? 1 : 0)
+  return { '=':difference===0, '<>':difference!==0, '<':difference<0, '>':difference>0, '<=':difference<=0, '>=':difference>=0 }[op]
+}
+
+function criterionMatches(criterion) {
+  const match = /^(<>|<=|>=|[<>=])?([\s\S]*)$/.exec(String(criterion ?? ''))
+  const op = match[1] || '=', literal = match[2]
+  const expected = isNumberText(literal) ? Number(literal) : literal
+  if (typeof expected === 'number') return value => {
+    if (typeof value === 'number' || value === null) return compare(value,expected,op)
+    return op === '<>'
+  }
+  if ((op === '=' || op === '<>') && /[~?*]/.test(literal)) {
+    const pattern = []
+    const chars = Array.from(literal.toLowerCase())
+    for (let i=0; i<chars.length; i++) {
+      if (chars[i] === '~' && ['?','*','~'].includes(chars[i+1])) pattern.push({literal:chars[++i]})
+      else if (chars[i] === '*') pattern.push({star:true})
+      else if (chars[i] === '?') pattern.push({any:true})
+      else pattern.push({literal:chars[i]})
+    }
+    return value => {
+      if (typeof value !== 'string') return op === '<>'
+      const input = Array.from(value.toLowerCase())
+      let i=0, p=0, star=-1, consumed=0
+      while (i < input.length) {
+        if (pattern[p]?.any || pattern[p]?.literal === input[i]) { i++; p++; continue }
+        if (pattern[p]?.star) { star=p++; consumed=i; continue }
+        if (star === -1) return op === '<>'
+        p=star+1; i=++consumed
+      }
+      while (pattern[p]?.star) p++
+      return op === '=' ? p === pattern.length : p !== pattern.length
+    }
+  }
+  return value => compare(value,expected,op)
 }
 
 function calculate(formula, current, getSheet, read) {
@@ -197,83 +339,100 @@ function calculate(formula, current, getSheet, read) {
   let index = 0
   const eat = type => tokens[index]?.type === type && ++index
   const need = type => { if (!eat(type)) fail('#VALUE!') }
+  const target = token => (token.sheet ? getSheet(token.sheet) : current) || fail('#REF!')
+  const scalar = value => Array.isArray(value) ? fail('#VALUE!') : value
+  const truth = value => typeof value === 'string' ? fail('#VALUE!') : Boolean(scalar(value))
 
   function primary() {
     const token = tokens[index++]
     if (!token) fail('#VALUE!')
-    if (token.type === 'number') return Number(token.text)
-    if (token.type === '(') { const value = sum(); need(')'); return value }
+    if (token.type === 'number') return () => Number(token.text)
+    if (token.type === 'string') return () => token.text.slice(1,-1).replaceAll('""','"')
+    if (token.type === '(') { const value = expression(); need(')'); return value }
     if (token.type === 'ref') {
-      const sheet = token.sheet ? getSheet(token.sheet) : current
-      if (!sheet) fail('#REF!')
-      return read(sheet, token.ref)
+      if (!eat(':')) return () => read(target(token),token.ref)
+      const end = tokens[index++]
+      if (end?.type !== 'ref' || end.sheet) fail('#REF!')
+      const box = bounds(location(token.ref), location(end.ref))
+      return () => {
+        if (box.bottom >= LIMITS.rows || box.right >= LIMITS.cols) fail('#REF!')
+        if ((box.bottom-box.top+1)*(box.right-box.left+1) > 50000) fail('#LIMIT!')
+        const values = [], sheet = target(token)
+        for (let r=box.top; r<=box.bottom; r++) for (let c=box.left; c<=box.right; c++) values.push(read(sheet,address(r,c)))
+        return values
+      }
     }
     if (token.type !== 'name') fail('#VALUE!')
+    const name = token.text.toUpperCase()
+    if (['TRUE','FALSE'].includes(name) && tokens[index]?.type !== '(') return () => name === 'TRUE'
     need('(')
-    const values = []
+    const args = []
     if (!eat(')')) {
-      do {
-        if (tokens[index]?.type === 'ref' && tokens[index + 1]?.type === ':') {
-          const start = tokens[index]
-          const end = tokens[index + 2]
-          if (end?.type !== 'ref' || end.sheet) fail('#REF!')
-          index += 3
-          const sheet = start.sheet ? getSheet(start.sheet) : current
-          if (!sheet) fail('#REF!')
-          const a = location(start.ref), b = location(end.ref)
-          if (Math.max(a.row,b.row) >= LIMITS.rows || Math.max(a.col,b.col) >= LIMITS.cols) fail('#REF!')
-          if ((Math.abs(a.row-b.row)+1) * (Math.abs(a.col-b.col)+1) > 50000) fail('#LIMIT!')
-          for (let r = Math.min(a.row,b.row); r <= Math.max(a.row,b.row); r++) {
-            for (let c = Math.min(a.col,b.col); c <= Math.max(a.col,b.col); c++) values.push(read(sheet,address(r,c)))
-          }
-        } else values.push(sum())
-      } while (eat(','))
+      do { args.push(expression()) } while (eat(','))
       need(')')
     }
-    const nums = values.filter(value => typeof value === 'number')
-    switch (token.text.toUpperCase()) {
-      case 'SUM': return nums.reduce((a,b) => a + b, 0)
-      case 'AVERAGE': return nums.length ? nums.reduce((a,b) => a + b, 0) / nums.length : fail('#DIV/0!')
-      case 'COUNT': return nums.length
-      case 'MIN': return nums.length ? nums.reduce((a,b) => Math.min(a,b)) : 0
-      case 'MAX': return nums.length ? nums.reduce((a,b) => Math.max(a,b)) : 0
-      case 'ABS': return values.length === 1 ? Math.abs(numberOf(values[0])) : fail('#VALUE!')
-      case 'ROUND': {
-        if (values.length !== 2) fail('#VALUE!')
-        const x = numberOf(values[0]), scale = 10 ** Math.trunc(numberOf(values[1]))
+    const valid = (min,max=min) => { if (args.length < min || args.length > max) fail('#VALUE!') }
+    return () => {
+      if (name === 'IF') {
+        valid(2,3)
+        return truth(args[0]()) ? scalar(args[1]()) : args[2] ? scalar(args[2]()) : false
+      }
+      if (name === 'COUNTIF' || name === 'SUMIF') {
+        valid(2,name === 'SUMIF' ? 3 : 2)
+        const samples = [args[0]()].flat(), matches = criterionMatches(scalar(args[1]()))
+        const amounts = args[2] ? [args[2]()].flat() : samples
+        if (samples.length !== amounts.length) fail('#VALUE!')
+        return samples.reduce((total,v,i) => matches(v) ? total + (name === 'COUNTIF' ? 1 : typeof amounts[i] === 'number' ? amounts[i] : 0) : total,0)
+      }
+      if (name === 'ABS') { valid(1); return Math.abs(numberOf(args[0]())) }
+      if (name === 'ROUND') {
+        valid(2)
+        const x = numberOf(args[0]()), scale = 10 ** Math.trunc(numberOf(args[1]()))
         return Math.sign(x) * Math.round(Math.abs(x) * scale) / scale
       }
-      default: return fail('#NAME?')
+      const values = args.flatMap(arg => [arg()].flat())
+      const nums = values.filter(value => typeof value === 'number')
+      switch (name) {
+        case 'SUM': return nums.reduce((a,b) => a+b,0)
+        case 'AVERAGE': return nums.length ? nums.reduce((a,b) => a+b,0)/nums.length : fail('#DIV/0!')
+        case 'COUNT': return nums.length
+        case 'COUNTA': return values.filter(v => v !== null).length
+        case 'MIN': return nums.length ? nums.reduce((a,b) => Math.min(a,b)) : 0
+        case 'MAX': return nums.length ? nums.reduce((a,b) => Math.max(a,b)) : 0
+        default: return fail('#NAME?')
+      }
     }
   }
+
   function unary() {
-    if (eat('-')) return -numberOf(unary())
-    if (eat('+')) return numberOf(unary())
+    if (eat('-')) { const val = unary(); return () => -numberOf(val()) }
+    if (eat('+')) { const val = unary(); return () => numberOf(val()) }
     return primary()
   }
   function power() {
-    const value = unary()
-    return eat('^') ? numberOf(value) ** numberOf(power()) : value
+    const left = unary()
+    if (!eat('^')) return left
+    const right = power()
+    return () => numberOf(left()) ** numberOf(right())
+  }
+  function series(term, operators, apply) {
+    const first = term(), rest = []
+    while (operators.includes(tokens[index]?.type)) rest.push([tokens[index++].text,term()])
+    return rest.length ? () => rest.reduce((left,[op,right]) => apply(left,op,right()),first()) : first
   }
   function product() {
-    let value = power()
-    while (['*','/'].includes(tokens[index]?.type)) {
-      const op = tokens[index++].type, right = numberOf(power())
-      if (op === '/' && right === 0) fail('#DIV/0!')
-      value = op === '*' ? numberOf(value) * right : numberOf(value) / right
-    }
-    return value
+    return series(power,['*','/'],(a,op,b) => {
+      const x=numberOf(a), y=numberOf(b)
+      if (op === '/' && !y) fail('#DIV/0!')
+      return op === '*' ? x*y : x/y
+    })
   }
-  function sum() {
-    let value = product()
-    while (['+','-'].includes(tokens[index]?.type)) {
-      const op = tokens[index++].type, right = numberOf(product())
-      value = op === '+' ? numberOf(value) + right : numberOf(value) - right
-    }
-    return value
-  }
-  const result = sum()
+  const sum = () => series(product,['+','-'],(a,op,b) => op === '+' ? numberOf(a)+numberOf(b) : numberOf(a)-numberOf(b))
+  const concat = () => series(sum,['&'],(a,op,b) => String(scalar(a) ?? '')+String(scalar(b) ?? ''))
+  const expression = () => series(concat,['comparison'],(a,op,b) => compare(scalar(a),scalar(b),op))
+  const evaluate = expression()
   if (index !== tokens.length) fail('#VALUE!')
+  const result = scalar(evaluate())
   if (typeof result === 'number' && !Number.isFinite(result)) fail('#NUM!')
   return result ?? 0
 }
@@ -357,6 +516,8 @@ export function writeRange(sheet, row, col, data) {
   data.forEach((line,r) => line.forEach((value,c) => {
     if (value.length > LIMITS.text) throw new Error('单元格最多 32767 个字符。')
     const addr = address(row+r,col+c)
+    const merge = findMerge(sheet,row+r,col+c)
+    if (merge && (row+r !== merge.top || col+c !== merge.left) && value) throw new Error('粘贴区域包含已合并单元格，请先取消合并。')
     if (value) cells[addr] = value
     else delete cells[addr]
   }))

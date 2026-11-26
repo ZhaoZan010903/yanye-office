@@ -61,7 +61,7 @@ export function textBox(values = {}) {
   return {
     id: values.id || crypto.randomUUID(), text: String(values.text ?? ''),
     x: bounded(values.x ?? .12, 0, 0, 1-w), y: bounded(values.y ?? .45, 0, 0, 1-h), w, h,
-    ...slideTextFormat(values),
+    ...slideTextFormat(values), ...(values.runs?.length?{runs:values.runs}:{}),
   }
 }
 

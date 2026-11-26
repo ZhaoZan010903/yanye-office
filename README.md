@@ -2,9 +2,9 @@
 
 砚页是一款面向 Windows 的开源本地办公软件。名字取自砚台与书页。你可以在同一棵页面树里写 Markdown、算预算、排项目进度、画流程，再把文档大纲整理成演示文稿。
 
-**0.9.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，再选「电子文档」，即可断网写作。电子文档自动保存到本机。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[Windows 安装与下载](https://github.com/ZhaoZan010903/yanye-office/releases/tag/v0.9.0) · [产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+**0.10.0 在 Windows 本机离线工作。** 在文件中心按 `Ctrl+O` 打开 DOCX、XLSX、XLSM、PPTX、PDF、Markdown 或 TXT。完整离线包还支持 DOC、RTF、ODT、XLS、ODS、PPT 和 ODP。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 选择格式另存。工作区文稿自动保存到本机。[Windows 下载](https://github.com/ZhaoZan010903/yanye-office/releases/tag/v0.10.0) · [本地转换引擎](docs/FORMAT_RUNTIME.md) · [产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
 
-新版将文字、表格、演示的文件菜单、保存按钮和选项卡放在同一行。文字新增目录、脚注、尾注及按节排版工具；表格可设置打印区域与标题、编辑单元格批注；演示的对象字体、段落、排列和动画可随 PPTX 保存。[三种工作区实机截图、支持范围与原生回读](docs/OFFICE_RIBBON.md)
+Word 可以插入浮动文本框、编辑公式、生成邮件合并文档和比较两个版本。Excel 提供打印预览，工作表可寻址至 XFD1048576。PowerPoint 支持选中同一文本框中的部分文字调整字体、字号、颜色，并可在母版中编辑背景和共享文字。[功能区与原应用回读](docs/OFFICE_RIBBON.md)
 
 ![砚页文件中心的新建入口、最近文件与本地目录](docs/files.png)
 
@@ -45,7 +45,7 @@ Markdown 的「阅读」和「源码」均可编辑。在「阅读」中直接�
 
 文件中心列出所选目录中的文件和子目录，支持新建目录、重命名、移动以及移入 Windows 系统回收站。「最近文件」可以打开选定目录以外使用过的文件。顶部标签切换已打开的文件。编辑器底部显示文件是否还有未写回的修改。砚页自动保留工作区草稿，写回 Office 文件由「保存文件」触发。
 
-首次写回外部 Office 文件时可以选择另存副本。覆盖前的上一份原件保存在 `%APPDATA%\YanYe\file-backups`，在已绑定页面的「页面操作 → 另存上次原件」可取回为独立文件。如果原文件被其他程序改过，砚页会提示改用另存。旧版二进制 DOC、XLS、PPT 和加密文件暂不支持直接编辑。
+首次写回外部 Office 文件时可以选择另存副本。覆盖前的上一份原件保存在 `%APPDATA%\YanYe\file-backups`，在已绑定页面的「页面操作 → 另存上次原件」可取回为独立文件。如果原文件被其他程序改过，砚页会提示改用另存。对于加密文件，先在原应用中解密另存。
 
 ## 在 Windows 上运行
 

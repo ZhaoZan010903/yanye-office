@@ -1,5 +1,5 @@
 import {SaxesParser} from 'saxes'
-import {columnName,location} from './spreadsheet.js'
+import {columnName,location,LIMITS} from './spreadsheet.js'
 import {chartData} from './sheet-chart.js'
 
 const chartNS='http://schemas.openxmlformats.org/drawingml/2006/chart'
@@ -65,7 +65,7 @@ export async function readChart(zip,sheetPath,id,sheetName) {
     const match=/^(?:'((?:[^']|'')+)'|([^!]+))!(\$?[A-Z]+\$?\d+)(?::(\$?[A-Z]+\$?\d+))?$/i.exec(formula??'')
     if(!match || (match[1]?.replace(/''/g,"'")??match[2]).toLowerCase()!==sheetName.toLowerCase()) return
     const a=location(match[3]),b=location(match[4]??match[3])
-    if(a && b && a.col===b.col && b.row>=a.row && b.row-a.row<500 && b.col<128 && b.row<5000) return {col:a.col,start:a.row,end:b.row}
+    if(a && b && a.col===b.col && b.row>=a.row && b.row-a.row<500 && b.col<LIMITS.cols && b.row<LIMITS.rows) return {col:a.col,start:a.row,end:b.row}
   }
   const label=source(data[0].cat)
   if (!label) return

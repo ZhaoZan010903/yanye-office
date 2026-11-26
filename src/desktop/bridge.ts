@@ -26,7 +26,7 @@ function events<T>() {
 }
 
 const libraryOperations = ['state', 'chooseRoot', 'list', 'mkdir', 'rename', 'move', 'trash',
-  'read', 'chooseOpen', 'recent', 'describe', 'readRecent', 'save', 'create', 'exportBackup'] as const
+  'read', 'chooseOpen', 'recent', 'describe', 'readRecent', 'readConverted', 'save', 'create', 'exportBackup'] as const
 type LibraryOperation = typeof libraryOperations[number]
 type LibraryMethods = Record<LibraryOperation, (...args: unknown[]) => Promise<unknown>>
 

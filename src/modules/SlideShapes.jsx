@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react'
 import { shapeKinds, slideShape, slideTextStyle } from './slides-model.js'
 import SlideParagraphs from './SlideParagraphs.jsx'
+import SlideRichText from './SlideRichText.jsx'
 
 const polygons = {triangle:'50,0 100,100 0,100',diamond:'50,0 100,50 50,100 0,50',rightArrow:'0,25 60,25 60,0 100,50 60,100 60,75 0,75'}
 
@@ -38,15 +39,16 @@ export function SlideShape({ shape, selected, onSelect, onMove,split }) {
       if(x!==shape.x || y!==shape.y) onMove({x,y})
     }} onLostPointerCapture={()=>{drag.current=null;setPreview(null)}}>
     <svg viewBox="0 0 100 100" aria-hidden="true" preserveAspectRatio="none" fill={'#'+shape.fill} stroke={'#'+shape.stroke}>{element}</svg>
-    <span className="slide-shape-text"><SlideParagraphs text={shape.text} split={split}/></span>
+    <span className="slide-shape-text"><SlideParagraphs text={shape.text} runs={shape.runs} split={split}/></span>
   </div>
 }
 
-export function ShapeProperties({ shape, shapes, select, edit, reorder, duplicate, remove }) {
+export function ShapeProperties({ shape, shapes, select, edit, onSelection, reorder, duplicate, remove }) {
   const index=shapes.indexOf(shape)
   return <div className="slides-panel slides-box-properties" aria-label="形状属性">
     <select aria-label="选中形状" value={shape.id} onChange={e=>select(e.target.value)}>{shapes.map((s,i)=><option key={s.id} value={s.id}>{i+1}. {s.text || shapeKinds[s.kind]}</option>)}</select>
-    <label>文字<input className="slide-shape-label" aria-label="形状文字" value={shape.text} onChange={e=>edit({text:e.target.value})}/></label>
+    <div className="slides-shape-text-field">文字<SlideRichText key={shape.id} className="slide-shape-label" label="形状文字" text={shape.text} runs={shape.runs}
+      onSelection={onSelection} onEdit={edit}/></div>
     {Object.entries({fill:'填充',stroke:'轮廓',color:'字色'}).map(([key,label])=><label key={key}>{label}<input type="color" aria-label={'形状'+label}
       value={'#'+shape[key]} onChange={e=>edit({[key]:e.target.value.slice(1)})}/></label>)}
     {Object.entries({x:'左',y:'上',w:'宽',h:'高',rotation:'旋转'}).map(([key,label])=>{

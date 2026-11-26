@@ -8,6 +8,10 @@ import { ShapeProperties, SlideShape } from './SlideShapes.jsx'
 import { slideTransition, speedNames, transitionNames } from './slide-transition.js'
 import {AnimatedPage,AnimationPanel} from './SlideAnimations.jsx'
 import SlideParagraphs from './SlideParagraphs.jsx'
+import SlideRichText from './SlideRichText.jsx'
+import SlideMasterEditor,{MasterLabels} from './SlideMasterEditor.jsx'
+import {masterFor,standardMaster} from './slide-masters.js'
+import {characterKeys,patchRuns,withoutOverrides} from './slide-runs.js'
 import {slideTargets} from './slide-animations.js'
 import './slide-animation.css'
 import './slides.css'
@@ -16,20 +20,20 @@ function positioned({ x, y, w, h }) {
   return { left: x * 100 + '%', top: y * 100 + '%', width: w * 100 + '%', height: h * 100 + '%' }
 }
 
-function FreeText({ box, index, selected, select, update, split }) {
+function FreeText({ box, index, selected, select, update, split, onSelection }) {
   const drag = useRef(null)
   const [preview,setPreview] = useState(null)
   const position = preview || box
   const style = { ...positioned(position), ...slideTextStyle(box) }
-  if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}><SlideParagraphs text={box.text} split={split}/></div>
+  if (!update) return <div data-animation-target={box.id} className="slides-text" style={style}><SlideParagraphs text={box.text} runs={box.runs} split={split}/></div>
   function dragPosition(e) {
     const start = drag.current
     return textBox({ ...box, x: start.x + (e.clientX - start.clientX) / start.width,
       y: start.y + (e.clientY - start.clientY) / start.height })
   }
   return <div className={'slides-freetext' + (selected ? ' selected' : '')} style={style}>
-    <textarea className="slides-text" aria-label={'文本框 ' + (index+1)} value={box.text} placeholder="输入文字"
-      onFocus={select} onChange={e => update({text:e.target.value})} />
+    <SlideRichText className="slides-text" label={'文本框 ' + (index+1)} text={box.text} runs={box.runs} placeholder="输入文字"
+      onActivate={select} onSelection={onSelection} onEdit={update}/>
     {selected && <button type="button" title="拖动文本框" aria-label="拖动文本框" className="slides-drag"
       onPointerDown={e => {
         if (e.button !== 0) return
@@ -44,12 +48,14 @@ function FreeText({ box, index, selected, select, update, split }) {
   </div>
 }
 
-function SlidePage({ slide, theme, edit, onImage, onFieldSelect, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit }) {
+function SlidePage({ slide, theme, edit, onImage, onFieldSelect, boxId, onBoxSelect, onBoxEdit, shapeId, onShapeSelect, onShapeEdit, onSelection, master,ratio }) {
   const boxes = slideBoxes(slide.layout)
   const split=new Set((slide.animations||[]).filter(e=>e.byParagraph || e.paragraph!=null).map(e=>e.target))
   const fields = { title: '幻灯片标题', body: '幻灯片正文', side: '右栏正文' }
   const placeholders = { title: '输入标题', body: slide.layout === 'cover' ? '添加副标题' : '添加正文', side: '添加右栏正文' }
-  return <div className="slides-page" style={{ '--slide-paper': '#' + theme.background, '--slide-ink': '#' + theme.ink }}>
+  const background=(!slide.inheritBackground && slide.background) || master?.background || theme.background
+  return <div className="slides-page" style={{aspectRatio:ratio, '--slide-paper': '#' + background, '--slide-ink': '#' + theme.ink }}>
+    {!slide.hideMasterShapes && <MasterLabels master={master}/>}
     {Object.entries(boxes).map(([field, box]) => {
       const style = { ...positioned(field==='title' && slide.titleBox || box), ...slideTextStyle(fieldFormat(slide,field,theme)) }
       if (field === 'side' && slide.layout === 'image') {
@@ -59,14 +65,15 @@ function SlidePage({ slide, theme, edit, onImage, onFieldSelect, boxId, onBoxSel
         </div>
       }
       const className = 'slides-text slides-' + field + (slide.layout === 'cover' ? ' cover' : '')
-      return edit ? <textarea key={field} className={className} style={style} aria-label={fields[field]}
-        placeholder={placeholders[field]} value={slide[field] || ''} onFocus={()=>onFieldSelect(field)} onChange={e => edit({ [field]: e.target.value })} spellCheck={false} /> :
-        <div key={field} data-animation-target={field} className={className} style={style}><SlideParagraphs text={slide[field]} split={split.has(field)}/></div>
+      return edit ? <SlideRichText key={slide.id+field} className={className} style={style} label={fields[field]}
+        placeholder={placeholders[field]} text={slide[field] || ''} runs={slide.fieldRuns?.[field]} onActivate={()=>onFieldSelect(field)}
+        onSelection={range=>onSelection(field,range)} onEdit={({text,runs})=>edit({[field]:text,fieldRuns:{...slide.fieldRuns,[field]:runs}})}/> :
+        <div key={field} data-animation-target={field} className={className} style={style}><SlideParagraphs text={slide[field]} runs={slide.fieldRuns?.[field]} split={split.has(field)}/></div>
     })}
     {(slide.shapes || []).map(shape=><SlideShape key={shape.id} shape={shape} selected={shape.id===shapeId} split={split.has(shape.id)}
       onSelect={edit ? ()=>onShapeSelect(shape.id) : undefined} onMove={edit ? patch=>onShapeEdit(shape.id,patch) : undefined}/>)}
     {(slide.textBoxes || []).map((box,i) => <FreeText key={box.id} box={box} index={i} selected={box.id === boxId} split={split.has(box.id)}
-      select={() => onBoxSelect?.(box.id)} update={edit ? patch => onBoxEdit(box.id,patch) : undefined} />)}
+      select={() => onBoxSelect?.(box.id)} onSelection={range=>onSelection(box.id,range)} update={edit ? patch => onBoxEdit(box.id,patch) : undefined} />)}
   </div>
 }
 
@@ -91,7 +98,11 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   const [boxId,setBoxId] = useState(null)
   const [shapeId,setShapeId] = useState(null), [shapeKind,setShapeKind] = useState('rect')
   const [activeField,setActiveField] = useState('title')
+  const [range,setRange] = useState(null)
   const [view,setView] = useState('normal'), [showGrid,setShowGrid] = useState(false)
+  const [masterId,setMasterId]=useState(null)
+  const masters=deck.masters?.length ? deck.masters : [standardMaster()]
+  const pageProps=slide=>({slide,theme,master:masterFor(deck,slide),ratio:deck.native?.size && deck.native.size.w/deck.native.size.h})
   const [showNotes,setShowNotes] = useState(true), [showThumbs,setShowThumbs] = useState(true), [zoom,setZoom] = useState(100)
   const shapes=selected.shapes || [], currentShape=shapes.find(s=>s.id===shapeId)
   const transition=slideTransition(selected.transition)
@@ -103,12 +114,27 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   const currentBox = freeBoxes.find(box => box.id === boxId)
   const field = activeField==='side' && selected.layout!=='columns' ? 'body' : activeField
   const currentObject=currentShape || currentBox
-  const activeFormat=currentShape ? {...currentShape,align:currentShape.shapeTextAlign || 'center'} : currentBox || fieldFormat(selected,field,theme)
+  const baseFormat=currentShape ? {...currentShape,align:currentShape.shapeTextAlign || 'center'} : currentBox || fieldFormat(selected,field,theme)
+  const target=currentObject?.id || field
+  const runs=currentObject ? currentObject.runs : selected.fieldRuns?.[field]
+  const selection=range?.slideId===selected.id && range.key===target && range.from<range.to ? range : null
+  const activeFormat={...baseFormat,...(selection && runs?.find(r=>r.from<=selection.from && selection.from<r.to)?.style)}
   const formatTarget=currentShape ? '形状' : currentBox ? '文本框' : {title:'标题',body:'正文',side:'右栏'}[field]
   function changeFormat(patch) {
-    if (currentShape) editShape(shapeId,patch.align ? {shapeTextAlign:patch.align} : patch)
-    else if (currentBox) editBox(boxId,patch)
-    else changeSlide(selected.id,{fieldFormats:{...selected.fieldFormats,[field]:{...selected.fieldFormats?.[field],...patch}}})
+    const character=Object.keys(patch).every(key=>characterKeys.includes(key))
+    if(selection && character){
+      const text=currentObject ? currentObject.text : selected[field]
+      const next=patchRuns(text,runs,selection.from,selection.to,patch)
+      if(currentShape) editShape(shapeId,{runs:next})
+      else if(currentBox) editBox(boxId,{runs:next})
+      else changeSlide(selected.id,{fieldRuns:{...selected.fieldRuns,[field]:next}})
+      return
+    }
+    const remaining=runs?.length && character ? withoutOverrides(runs,patch) : null
+    if (currentShape) editShape(shapeId,patch.align ? {shapeTextAlign:patch.align} : {...patch,...(remaining && {runs:remaining})})
+    else if (currentBox) editBox(boxId,{...patch,...(remaining && {runs:remaining})})
+    else changeSlide(selected.id,{fieldFormats:{...selected.fieldFormats,[field]:{...selected.fieldFormats?.[field],...patch}},
+      ...(remaining && {fieldRuns:{...selected.fieldRuns,[field]:remaining}})})
   }
   function duplicateObject() {
     if (currentShape) { insertShape(currentShape);return }
@@ -128,6 +154,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const pages = sourcePages.filter(p => typeof p.markdown === 'string')
   const fileTitle = title.trim() || deck.slides[0].title.trim() || '演示文稿'
+  const pageWidth=deck.native?.size?.w ? deck.native.size.w/914400 : 40/3
+  const pageHeight=deck.native?.size?.h ? deck.native.size.h/914400 : 7.5
 
   async function printDeck() {
     await run(async () => {
@@ -135,7 +163,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       try {
         await Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.slides-print img')].map(img => img.decode())])
         await new Promise(resolve => requestAnimationFrame(resolve))
-        if (alive.current) await onPrintPdf(fileTitle + '.pdf', { widthMm: 13.333333 * 25.4, heightMm: 7.5 * 25.4 })
+        if (alive.current) await onPrintPdf(fileTitle + '.pdf', { widthMm:pageWidth*25.4,heightMm:pageHeight*25.4 })
       } finally {
         if (alive.current) setPrinting(false)
       }
@@ -177,18 +205,23 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
     const box = textBox({ x:.12 + from * .04, y:.45 + from * .04, color:theme.ink })
     if (changeSlide(selected.id,{textBoxes:[...freeBoxes,box]})) {
       selectBox(box.id)
-      requestAnimationFrame(() => root.current?.querySelector('.slides-freetext.selected textarea')?.focus())
+      requestAnimationFrame(() => root.current?.querySelector('.slides-freetext.selected [contenteditable]')?.focus())
     }
   }
-  function append(slides, importedTheme) {
+  function append(slides, imported) {
     const current = latest.current
     const blank = current.slides.length === 1 && !current.slides[0].textBoxes?.length && !current.slides[0].shapes?.length && !['title', 'body', 'side', 'notes', 'image'].some(k => current.slides[0][k])
     const list = blank ? [] : current.slides
-    const next = { ...current, slides: [...list, ...slides], theme: blank && importedTheme ? importedTheme : current.theme }
+    const next = blank && imported ? imported : { ...current, slides: [...list, ...slides] }
+    if(!blank && imported) {
+      // Appended slides adopt the destination master. Importing into an empty
+      // deck and opening a file directly retain its original master family.
+      next.slides=[...list,...slides.map(s=>({...s,native:undefined,layoutPart:undefined,masterId:selected.masterId || masters[0].id}))]
+    }
     if (save(next)) { setActiveId(slides[0].id); setPanel(''); setDeleted(null) }
   }
   function insert(duplicate) {
-    const slide = newSlide(duplicate ? { ...selected, id: crypto.randomUUID() } : {})
+    const slide = newSlide(duplicate ? { ...selected, id: crypto.randomUUID() } : {masterId:selected.masterId,layoutPart:selected.native?.layout || selected.layoutPart})
     const slides = deck.slides.slice()
     slides.splice(index + 1, 0, slide)
     if (save({ ...deck, slides })) setActiveId(slide.id)
@@ -271,7 +304,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       if (!file || !alive.current) return
       const { importPptx } = await import('./slides-pptx.js')
       const imported = await importPptx(file.text)
-      if (alive.current) append(imported.slides, imported.theme)
+      if (alive.current) append(imported.slides, imported)
     })
   }
   async function setImage(event) {
@@ -296,7 +329,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   return <section ref={root} tabIndex={-1} className={'slides-editor' + (playing ? ' is-playing' : '')} aria-label="演示文稿编辑器">
     {playing ? <div className="slides-show">
       <div key={selected.id} className={'slides-projector transition-'+transition.effect} style={{'--fade-time':{fast:'.25s',med:'.6s',slow:'1s'}[transition.speed]}}
-        onClick={()=>{ if(!playback.current?.advance() && transition.click && index+1<deck.slides.length) setActiveId(deck.slides[index+1].id) }}><AnimatedPage ref={playback} slide={selected}><SlidePage slide={selected} theme={theme}/></AnimatedPage></div>
+        onClick={()=>{ if(!playback.current?.advance() && transition.click && index+1<deck.slides.length) setActiveId(deck.slides[index+1].id) }}><AnimatedPage ref={playback} slide={selected}><SlidePage {...pageProps(selected)}/></AnimatedPage></div>
       <div className="slides-show-bar">
         <button type="button" disabled={!index} onClick={() => setActiveId(deck.slides[index - 1].id)}>上一页</button>
         <span aria-live="polite">{index + 1} / {deck.slides.length}</span>
@@ -343,7 +376,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         </RibbonGroup>}
         {tab==='视图' && <>
           <RibbonGroup label="演示视图"><button type="button" className="slides-large-tool" aria-pressed={view==='normal'} onClick={()=>setView('normal')}><GalleryHorizontalEnd size={21}/>普通视图</button>
-            <button type="button" className="slides-large-tool" aria-pressed={view==='sorter'} onClick={()=>setView('sorter')}><LayoutGrid size={21}/>幻灯片浏览</button></RibbonGroup>
+            <button type="button" className="slides-large-tool" aria-pressed={view==='sorter'} onClick={()=>setView('sorter')}><LayoutGrid size={21}/>幻灯片浏览</button>
+            <button type="button" className="slides-large-tool" aria-pressed={view==='master'} onClick={()=>{setMasterId(selected.masterId);setView('master')}}><PanelTop size={21}/>幻灯片母版</button></RibbonGroup>
           <RibbonGroup label="显示"><div className="slides-tool-stack">
             <label><input type="checkbox" disabled={view==='sorter'} checked={showThumbs} onChange={e=>setShowThumbs(e.target.checked)}/>缩略图窗格</label>
             <label><input type="checkbox" disabled={view==='sorter'} checked={showGrid} onChange={e=>setShowGrid(e.target.checked)}/>网格线</label></div>
@@ -363,6 +397,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         <IconAction icon={X} label="关闭切换设置" onClick={()=>{setPanel('');setTab('开始')}}/>
       </RibbonGroup></div>}
       {currentShape && ['开始','插入'].includes(tab) && view==='normal' && <ShapeProperties shape={currentShape} shapes={shapes} select={selectShape} edit={patch=>editShape(shapeId,patch)}
+        onSelection={r=>setRange({...r,key:shapeId,slideId:selected.id})}
         reorder={direction=>changeSlide(selected.id,{shapes:moveSlide(shapes,shapes.indexOf(currentShape),direction)})}
         duplicate={()=>insertShape(currentShape)} remove={()=>{if(changeSlide(selected.id,{shapes:shapes.filter(s=>s.id!==shapeId)}))setShapeId(null)}}/>}
       {currentBox && ['开始','插入'].includes(tab) && view==='normal' && <div className="slides-panel slides-box-properties" aria-label="文本框属性">
@@ -388,6 +423,8 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       {panel === 'import' && <div className="slides-panel"><span>按原页序追加文本、常用形状、备注和每页首张 PNG / JPEG。导入采用本地版式，可识别的对象动画会进入动画面板；组合及媒体会简化。</span>
         <button type="button" disabled={busy} onClick={importFile}>选择 PPTX 文件</button><IconAction icon={X} label="关闭导入" onClick={() => setPanel('')} /></div>}
       {error && <p className="slides-error" role="alert">{error}</p>}
+      {view==='master' ? <SlideMasterEditor masters={masters} activeId={masterId} setActiveId={setMasterId} theme={theme} ratio={pageProps(selected).ratio}
+        update={model=>save({...deck,masters:masters.map(m=>m.id===model.id?model:m)})} close={()=>setView('normal')}/> :
       <div className={'slides-layout'+(view==='sorter'?' slides-sorter':'')+(!showThumbs?' slides-no-thumbs':'')}>
         {(view==='sorter' || showThumbs) && <aside className="slides-outline" aria-label="幻灯片列表">
           <div className="slides-list-actions">
@@ -401,15 +438,16 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
             onClick={() => setActiveId(s.id)} onDoubleClick={()=>setView('normal')}
             onKeyDown={e=>{if(view==='sorter' && e.key==='Enter'){e.preventDefault();setActiveId(s.id);setView('normal')}}}
             aria-label={'第 ' + (i + 1) + ' 页 ' + (s.title || '未命名')}>
-            <div className="slides-mini" aria-hidden="true"><SlidePage theme={theme} slide={s}/></div>
+            <div className="slides-mini" aria-hidden="true"><SlidePage {...pageProps(s)}/></div>
             <span className="slides-number">{i + 1}</span>
           </button>)}
         </aside>}
         {view==='normal' && <div className="slides-workarea">
-          <div className={'slides-canvas'+(showGrid?' slides-grid':'')} style={{width:zoom+'%',maxWidth:(1180*zoom/100)+'px'}}><SlidePage theme={theme} slide={selected} edit={patch => changeSlide(selected.id, patch)}
-            onFieldSelect={selectField}
+          <div className={'slides-canvas'+(showGrid?' slides-grid':'')} style={{width:zoom+'%',maxWidth:(1180*zoom/100)+'px'}}><SlidePage {...pageProps(selected)} edit={patch => changeSlide(selected.id, patch)}
+            onFieldSelect={selectField} onSelection={(key,range)=>setRange({...range,key,slideId:selected.id})}
             onImage={() => imageInput.current.click()} boxId={boxId} onBoxSelect={selectBox} onBoxEdit={editBox}
             shapeId={shapeId} onShapeSelect={selectShape} onShapeEdit={editShape} /></div>
+          {tab==='视图' && selected.background && !selected.inheritBackground && <div className="slides-image-tools"><button onClick={()=>changeSlide(selected.id,{inheritBackground:true})}>使用母版背景</button></div>}
           {selected.layout === 'image' && selected.image && <div className="slides-image-tools">
             <button type="button" onClick={() => imageInput.current.click()}>更换插图</button>
             <button type="button" onClick={() => changeSlide(selected.id, { image: null })}>移除插图</button>
@@ -418,11 +456,11 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
           {showNotes && <label className="slides-notes">演讲者备注<textarea aria-label="演讲者备注" placeholder="为当前页添加演讲提示…" value={selected.notes}
             onChange={e => changeSlide(selected.id, { notes: e.target.value })} /></label>}
         </div>}
-      </div>
+      </div>}
     </>}
     {printing && createPortal(<div className="slides-print" aria-hidden="true">
       <style>{`@media print {
-        @page { size: 13.333333in 7.5in; margin: 0; }
+        @page { size: ${pageWidth}in ${pageHeight}in; margin: 0; }
         html, body { height: auto !important; overflow: visible !important; margin: 0; }
         body > :not(.slides-print) { display: none !important; }
         .slides-print { display: block !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -430,7 +468,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         .slides-print > .slides-page:last-child { break-after: auto; }
         .slides-print .slides-text { scrollbar-width: none; }
       }`}</style>
-      {deck.slides.map(s => <SlidePage key={s.id} theme={theme} slide={s} />)}
+      {deck.slides.map(s => <SlidePage key={s.id} {...pageProps(s)}/>)}
     </div>, document.body)}
   </section>
 }

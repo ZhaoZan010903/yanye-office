@@ -1,4 +1,5 @@
 import { base64, base64Bytes, decodeText, detectEncoding, encodeText, legacyChinese, textModel } from './modules/plain-text.js'
+import { editorExtension } from '../shared/file-formats.mjs'
 
 export const fileTypes = Object.freeze({
   docx: { kind: 'word', label: 'Word 文档', initialName: '新建文档' },
@@ -8,6 +9,13 @@ export const fileTypes = Object.freeze({
   md: { kind: 'note', label: 'Markdown 文档', initialName: '新建笔记' },
   txt: { kind:'txt', label:'纯文本', initialName:'新建文本' },
   pdf: { kind:'pdf', label:'PDF 阅读器', openOnly:true },
+  doc: { kind:'word', label:'Word 97–2003 文档', initialName:'新建文档' },
+  rtf: { kind:'word', label:'RTF 富文本', initialName:'新建文档' },
+  odt: { kind:'word', label:'OpenDocument 文本', initialName:'新建文档' },
+  xls: { kind:'spreadsheet', label:'Excel 97–2003 工作簿', initialName:'新建工作簿' },
+  ods: { kind:'spreadsheet', label:'OpenDocument 表格', initialName:'新建工作簿' },
+  ppt: { kind:'presentation', label:'PowerPoint 97–2003 演示文稿', initialName:'新建演示文稿' },
+  odp: { kind:'presentation', label:'OpenDocument 演示文稿', initialName:'新建演示文稿' },
 })
 
 export function pageExtension(page) {
@@ -80,7 +88,7 @@ export async function writeOfficeFile(page, readOriginal) {
     const {patchWorkbook}=await import('./modules/preserved-workbook.js')
     return base64(await patchWorkbook(bytes,page.content.preserved?.edits || {}))
   }
-  switch (pageExtension(page)) {
+  switch (editorExtension(pageExtension(page))) {
     case 'md': return page.markdown
     case 'txt': {
       if (legacyChinese(page.content?.encoding)) {

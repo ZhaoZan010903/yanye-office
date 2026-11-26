@@ -1,0 +1,16 @@
+.word-advanced-panel { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; padding:8px 12px; background:#f7f6f3; border-bottom:1px solid #e9e7e4; font-size:13px; }
+.word-advanced-panel label { display:inline-flex; align-items:center; gap:4px; }
+.word-advanced-panel :is(input,textarea,select,button) { border:1px solid #e9e7e4; border-radius:4px; background:white; font:inherit; padding:4px 6px; }
+.word-advanced-panel input[type=number] { width:64px; }
+.word-advanced-panel input[type=color] { width:34px; padding:2px; }
+.word-advanced-panel [role=alert] { color:#a13a35; }
+.word-workflow { max-height:36vh; overflow:auto; }
+.word-workflow table,.word-merge-preview { flex-basis:100%; border-collapse:collapse; }
+.word-workflow :is(th,td) { text-align:left; padding:4px 8px; border:1px solid #e9e7e4; white-space:pre-wrap; }
+.word-sheet .word-prose :is(p,h1,h2,h3,h4,h5,h6):has(.word-float-anchor) { position:relative; }
+.word-float-anchor { display:inline-block; width:0; height:0; }
+.word-float-frame { position:absolute; display:block; box-sizing:border-box; padding:3.6pt 7.2pt; border:1pt solid; white-space:pre-wrap; overflow:hidden; z-index:1; font-weight:400; cursor:pointer; }
+.word-equation { display:inline-block; vertical-align:middle; cursor:pointer; font:1.05em "Cambria Math",serif; }
+.word-equation math { font-family:"Cambria Math",serif; }
+.word-float-anchor.ProseMirror-selectednode .word-float-frame,.word-equation.ProseMirror-selectednode { outline:1px solid #2e7795; }
+@media print { .word-print-root .word-prose :is(p,h1,h2,h3,h4,h5,h6):has(.word-float-anchor) { position:relative; } }

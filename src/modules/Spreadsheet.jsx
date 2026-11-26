@@ -1,3 +1,4 @@
+import {flushSync} from 'react-dom'
 import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownAZ, BarChart3, Bold, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, FileDown, FileUp, Filter, Grid2X2, IndentDecrease, IndentIncrease, Italic, MessageSquarePlus, MessageSquareX, Percent, Plus, Redo2, Rows3, Sigma, Strikethrough, Table2, Underline, Undo2, WrapText } from 'lucide-react'
@@ -8,6 +9,8 @@ import {
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
 import FontPicker from './FontPicker.jsx'
 import SheetRules from './SheetRules.jsx'
+import {columnAxis,rowHeight,rowOrder,rowSizes,sizedAxis,visibleColumns} from './sheet-viewport.js'
+import SheetPrintPreview from './SheetPrintPreview.jsx'
 import SheetPageControls from './SheetPageControls.jsx'
 import SheetNoteEditor from './SheetNoteEditor.jsx'
 import SheetPivot, { PivotSlicers } from './SheetPivot.jsx'
@@ -17,31 +20,7 @@ import {chartData,newChart,palettes} from './sheet-chart.js'
 import {conditionalFill,conditionRules,filterRow,listChoices,validationAt} from './spreadsheet.js'
 import './spreadsheet.css'
 
-const rowHeight = 30
-const collator = new Intl.Collator('zh-CN', { numeric: true })
-function cellBorders(borders) {
-  if (!borders) return
-  const css={}
-  for (const [side,property] of [['top','borderTop'],['bottom','borderBottom'],['left','borderLeft'],['right','borderRight']]) {
-    const item=borders[side]
-    if (!item?.style) continue
-    const color=/^(?:[0-9a-f]{2})?[0-9a-f]{6}$/i.test(item.color?.argb) ? '#'+item.color.argb.slice(-6) : '#37352f'
-    const stroke=item.style==='double' ? 'double' : /dash/i.test(item.style) ? 'dashed' : item.style==='dotted' ? 'dotted' : 'solid'
-    const width=stroke==='double' || item.style==='thick' ? 3 : /medium/i.test(item.style) ? 2 : 1
-    css[property]=width+'px '+stroke+' '+color
-  }
-  return css
-}
-
-function rowAt(offsets,y) {
-  let low=0, high=offsets.length-1
-  while (low < high) {
-    const mid=Math.ceil((low+high)/2)
-    if (offsets[mid]<=y) low=mid
-    else high=mid-1
-  }
-  return Math.min(low,offsets.length-2)
-}
+import {cellBorders} from './sheet-borders.js'
 
 function SheetChart({sheet,display,apply}) {
   const data=useMemo(()=>chartData(sheet,display),[sheet,display])
@@ -74,7 +53,7 @@ function SheetMenu({ label, icon: Icon, children }) {
   </details>
 }
 
-export default function Spreadsheet({ value, onChange, onImport, onExport }) {
+export default function Spreadsheet({ value, onChange, onImport, onExport, onPrintPdf }) {
   const blank = useMemo(emptyWorkbook, [])
   const book = Array.isArray(value?.sheets) && value.sheets.length ? value : blank
   const sheet = book.sheets.find(s => s.id === book.active) ?? book.sheets[0]
@@ -89,7 +68,10 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
-  const [scroll, setScroll] = useState(0)
+  const [scroll, setScroll] = useState({top:0,left:0})
+  const [viewportWidth,setViewportWidth]=useState(1000)
+  const [preview,setPreview]=useState(false)
+  const pendingJump=useRef(null)
   const [height, setHeight] = useState(450)
   const [tab, setTab] = useState('开始')
   const [noteOpen,setNoteOpen] = useState(false)
@@ -100,7 +82,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const history = useRef({past:[],future:[]})
   const drag = useRef(false)
   const clipboard = useRef(null)
-  const scroller = useRef(null), editInput = useRef(null), original = useRef(''), focusGrid = useRef(false)
+  const scroller = useRef(null), editInput = useRef(null), original = useRef(''), draft=useRef(null), focusGrid = useRef(false)
   const row = Math.min(selection.row, sheet.rows-1), col = Math.min(selection.col,sheet.cols-1)
   const selected = address(row,col)
   const endRow = Math.min(selection.endRow ?? row,sheet.rows-1), endCol = Math.min(selection.endCol ?? col,sheet.cols-1)
@@ -118,69 +100,52 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   const sort = sheet.sort
   const filter = sheet.query ?? ''
   const verticalMerges = sheet.merges?.some(m => m.bottom > m.top)
-  const allRows = useMemo(() => {
-    let rows = Array.from({ length: sheet.rows-1 }, (_,i) => i+1)
-    if (Object.keys(sheet.autoFilter?.columns??{}).length) rows=rows.filter(r=>filterRow(sheet,r,display))
-    if (filter.trim()) {
-      const needle = filter.toLocaleLowerCase().trim()
-      rows = rows.filter(r => {
-        for (let c=0; c<sheet.cols; c++) if (String(display(sheet,address(r,c))).toLocaleLowerCase().includes(needle)) return true
-        return false
-      })
+  const allRows=useMemo(()=>rowOrder(sheet,display),[sheet,display])
+  const columns=useMemo(()=>columnAxis(sheet),[sheet.cols,sheet.widths])
+  const heights=useMemo(()=>rowSizes(sheet,display,columns),[sheet.styles,sheet.heights,display,columns])
+  const rows=useMemo(()=>{
+    const changes={}
+    for(const [r,h] of Object.entries(heights)) {
+      const index=allRows.index(Number(r))
+      if(index>=0) changes[index]=h
     }
-    if (sort) rows.sort((a,b) => {
-      const left = display(sheet,address(a,sort.col)), right = display(sheet,address(b,sort.col))
-      if (left === '' || right === '') return Number(left === '') - Number(right === '')
-      const compare = typeof left === 'number' && typeof right === 'number' ? left-right : collator.compare(String(left),String(right))
-      return sort.desc ? -compare : compare
-    })
-    return [0,...rows]
-  }, [sheet,display,sort,filter])
-  const heights = useMemo(()=>{
-    const values=Array(sheet.rows).fill(rowHeight)
-    let measure
-    for (const [ref,style] of Object.entries(sheet.styles ?? {})) {
-      const {row:r,col:c}=location(ref)
-      if (style.size) {
-        values[r]=Math.max(values[r],Math.ceil(style.size*1.7)+4)
-      }
-      if (style.wrap && sheet.cells[ref] && !sheet.heights?.[r]) {
-        measure ??= document.createElement('canvas').getContext('2d')
-        if (!measure) continue
-        const size=style.size || 10
-        const merged=findMerge(sheet,r,c)
-        let width=0
-        for (let i=c;i<=(merged?.right ?? c);i++) width+=sheet.widths?.[i] ? Math.max(15,Math.round(sheet.widths[i]*7+5)) : 104
-        measure.font=(style.bold?'bold ':'')+size+'pt '+(style.font || '"Segoe UI",sans-serif')
-        const lines=String(formatted(display(sheet,ref),sheet.formats?.[ref])).split(/\r?\n/).reduce((n,s)=>
-          n+Math.max(1,Math.ceil(measure.measureText(s).width/Math.max(1,width-15-(style.indent || 0)*12))),0)
-        values[r]=Math.max(values[r],Math.min(545,Math.ceil(lines*size*1.85)+5))
-      }
-    }
-    for (const [r,pt] of Object.entries(sheet.heights ?? {})) values[r]=Math.max(12,Math.round(pt*4/3))
-    return values
-  },[sheet,display])
-  const offsets = useMemo(()=>{
-    const values=[0]
-    for (const r of allRows) values.push(values.at(-1)+heights[r])
-    return values
+    return sizedAxis(allRows.length,rowHeight,changes)
   },[allRows,heights])
-  const first = Math.max(0,rowAt(offsets,scroll)-5)
-  const last = Math.min(allRows.length,rowAt(offsets,scroll+height)+7)
-  const visibleRows = allRows.slice(first,last)
-  const frozenHeaderDetached = sheet.freezeHeader && first>0
-  if (frozenHeaderDetached) visibleRows.unshift(0)
-  const cols = Array.from({length:sheet.cols},(_,i)=>i)
-  const widths = cols.map(c => sheet.widths?.[c] ? Math.max(15, Math.round(sheet.widths[c]*7+5)) : 104)
-  const rowIndices = [allRows.indexOf(row),allRows.indexOf(endRow)]
-  const rangeRows = rowIndices.includes(-1) ? [row] : allRows.slice(Math.min(...rowIndices),Math.max(...rowIndices)+1)
-  const highlighted = new Set(rangeRows)
-  const mergeGrid = new Map()
-  for (const box of sheet.merges ?? []) {
-    const displayed = visibleRows.filter(r => r >= box.top && r <= box.bottom)
-    for (const r of displayed) for (let c=box.left; c<=box.right; c++) {
-      mergeGrid.set(address(r,c), {box, first:r===displayed[0] && c===box.left, height:displayed.length})
-    }
+  // Chromium caps element heights. Map the scrollbar to the logical row offsets.
+  const scale=Math.max(1,(rows.total-height+rowHeight)/Math.max(1,16000000-height+rowHeight))
+  const logicalTop=scroll.top*scale
+  const bucketSize=8
+  const rowBucket=Math.floor(rows.index(logicalTop)/bucketSize)*bucketSize
+  const first=Math.max(0,rowBucket-2),last=Math.min(rows.count,rows.index(rows.offset(rowBucket+bucketSize)+height)+3)
+  const topSpace=Math.max(0,rows.offset(first)-logicalTop+scroll.top)
+  const scrollHeight=(rows.total-height+rowHeight)/scale+height
+  const visibleRows=allRows.slice(first,last)
+  const frozenHeaderDetached=sheet.freezeHeader && first>0 && allRows.at(0)===0
+  if(frozenHeaderDetached) visibleRows.unshift(0)
+  const colBucket=Math.floor(columns.index(scroll.left)/4)*4
+  const slots=visibleColumns(columns,columns.offset(colBucket),viewportWidth+columns.offset(colBucket+4)-columns.offset(colBucket),sheet.freezeColumn)
+  function scrollGrid(event) {
+    const {scrollTop:top,scrollLeft:left}=event.currentTarget
+    if(scale===1 && Math.floor(rows.index(top)/bucketSize)*bucketSize===rowBucket && Math.floor(columns.index(left)/4)*4===colBucket)return
+    if(editing && draft.current && finishDraft())setEditing(false)
+    setScroll({top,left})
+  }
+  const visibleSlots=slots.filter(slot=>!slot.spacer)
+  const visibleCols=visibleSlots.map(slot=>slot.col)
+  const tableLeft=slots.find(slot=>slot.spacer==='left')?.width || 0
+  const tableWidth=44+visibleSlots.reduce((sum,slot)=>sum+slot.width,0)
+  const selectedRows=[allRows.index(row),allRows.index(endRow)]
+  const selectedStart=Math.min(...selectedRows), selectedEnd=Math.max(...selectedRows)
+  function rangeRows() {return selectedStart<0 ? [row] : allRows.slice(selectedStart,selectedEnd+1)}
+  const mergeGrid=new Map()
+  for(const box of sheet.merges || []) {
+    const rs=visibleRows.filter(r=>r>=box.top && r<=box.bottom)
+    const cs=visibleCols.filter(c=>c>=box.left && c<=box.right)
+    const split=cs.length>1 && cs[1]>cs[0]+1
+    for(const r of rs) for(const c of cs) mergeGrid.set(address(r,c),{
+      box,first:r===rs[0] && (c===cs[0] || (split && c===cs[1])),
+      height:rs.length,width:split ? (c===cs[0] ? 1 : cs.length-1) : cs.length,
+    })
   }
   useEffect(() => {
     const release = () => { drag.current = false }
@@ -190,7 +155,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   },[])
 
   useLayoutEffect(() => {
-    const observer = new ResizeObserver(entries => setHeight(entries[0].contentRect.height))
+    const observer = new ResizeObserver(([entry]) => {setHeight(entry.contentRect.height);setViewportWidth(entry.contentRect.width)})
     observer.observe(scroller.current)
     return () => observer.disconnect()
   }, [])
@@ -216,16 +181,15 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     const prev = latest.current, next = from.at(-1)
     if (next && change(next,false)) { from.pop(); to.push(prev); setEditing(false); select({row:0,col:0}) }
   }
-  function applyStyle(patch) { updateSheet(changeCellStyle(sheet,rangeRows,range.left,range.right,patch)) }
+  function applyStyle(patch) { updateSheet(changeCellStyle(sheet,rangeRows(),range.left,range.right,patch)) }
   function updateSheet(next) {
     if(editsPivotResults(sheet,next)) {setNotice('透视结果由源数据生成，请修改源单元格后刷新。');return false}
     const current = latest.current
     return change({ ...current, sheets:current.sheets.map(s=>s.id===next.id ? next : s) })
   }
   function navigateNote(direction) {
-    const order=new Map(allRows.map((r,i)=>[r,i]))
-    const visible=noteRefs.filter(p=>order.has(p.row))
-    const position=p=>(order.get(p.row) ?? -1)*sheet.cols+p.col
+    const visible=noteRefs.filter(p=>allRows.index(p.row)>=0)
+    const position=p=>allRows.index(p.row)*sheet.cols+p.col
     visible.sort((a,b)=>position(a)-position(b))
     const from=position({row,col})
     const dest=direction>0 ? visible.find(p=>position(p)>from) || visible[0] : visible.findLast(p=>position(p)<from) || visible.at(-1)
@@ -239,7 +203,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     if (updateSheet({...sheet,notes})) setNoteOpen(false)
   }
   function selectionText() {
-    return delimitedText(rangeRows.map(r=>Array.from({length:range.right-range.left+1},(_,i)=>display(sheet,address(r,range.left+i)))),'\t')
+    return delimitedText(rangeRows().map(r=>Array.from({length:range.right-range.left+1},(_,i)=>display(sheet,address(r,range.left+i)))),'\t')
   }
   async function copySelection() {
     const previous=clipboard.current
@@ -251,7 +215,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   }
   function pasteCells(matrix,internal) {
     if ((sort || filter || Object.keys(nativeFilter?.columns??{}).length) && matrix.length>1) throw Error('请还原行序并清除筛选，再粘贴多行。')
-    updateSheet((internal ? pasteRange : writeRange)(sheet,rangeRows[0],range.left,matrix))
+    updateSheet((internal ? pasteRange : writeRange)(sheet,(selectedStart<0 ? row : allRows.at(selectedStart)),range.left,matrix))
     setEditing(false)
   }
   async function pasteValues() {
@@ -282,37 +246,68 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
   function put(text) {
     tryAction(() => updateSheet(writeRange(sheet,row,col,[[text]])))
   }
+  function finishDraft() {
+    const active=draft.current
+    if(!active) return true
+    if(active.value!==active.original) {
+      try {
+        if(!updateSheet(writeRange(sheet,active.row,active.col,[[active.value]])))return false
+      } catch(error){setNotice(error.message);return false}
+    }
+    draft.current=null
+    return true
+  }
   function go(r,c,focus = true,extend = false) {
+    if(!finishDraft())return
     r = Math.max(0,Math.min(sheet.rows-1,r)); c = Math.max(0,Math.min(sheet.cols-1,c))
     const merge = findMerge(sheet,r,c)
     if (merge && !extend) { r=merge.top; c=merge.left }
     setEditing(false); focusGrid.current = focus
     select(extend ? {...selection,endRow:r,endCol:c} : {row:r,col:c})
     if (!focus) return
-    const index = allRows.indexOf(r), box = scroller.current
+    const index = allRows.index(r), box = scroller.current
     if (index >= 0 && box) {
-      const top = offsets[index]
-      if (top < box.scrollTop) box.scrollTop = top
-      if (top + heights[r]+rowHeight > box.scrollTop + box.clientHeight) box.scrollTop = top + heights[r]+rowHeight - box.clientHeight
-      const left = 44+widths.slice(0,c).reduce((a,b)=>a+b,0)
+      const top = rows.offset(index)
+      if (top < box.scrollTop*scale) box.scrollTop = top/scale
+      if (top+rows.size(index)+rowHeight > box.scrollTop*scale+box.clientHeight) box.scrollTop=(top+rows.size(index)+rowHeight-box.clientHeight)/scale
+      const left = 44+columns.offset(c)
       if (left < box.scrollLeft+44) box.scrollLeft = left-44
-      if (left+widths[c] > box.scrollLeft+box.clientWidth) box.scrollLeft = left+widths[c]-box.clientWidth
+      if (left+columns.size(c) > box.scrollLeft+box.clientWidth) box.scrollLeft = left+columns.size(c)-box.clientWidth
     }
+  }
+  useLayoutEffect(()=>{
+    if(!pendingJump.current) return
+    const {row:r,col:c}=pendingJump.current
+    pendingJump.current=null
+    go(r,c)
+  },[sheet.rows,sheet.cols])
+  function jumpTo(ref) {
+    const target=location(ref.trim().toUpperCase())
+    if(!target || target.row<0 || target.col<0 || target.row>=LIMITS.rows || target.col>=LIMITS.cols) {
+      setNotice('请输入有效的单元格地址，例如 A1 或 XFD1048576。')
+      return
+    }
+    if(target.row<sheet.rows && target.col<sheet.cols) {go(target.row,target.col);return}
+    pendingJump.current=target
+    if(!updateSheet({...sheet,rows:Math.max(sheet.rows,target.row+1),cols:Math.max(sheet.cols,target.col+1)})) pendingJump.current=null
   }
   function vertical(delta) {
     const merge = findMerge(sheet,row,col)
     const from = merge && delta>0 ? merge.bottom : row
-    const index = Math.max(0, allRows.indexOf(from))
-    go(allRows[Math.max(0,Math.min(allRows.length-1,index+delta))],col)
+    const index = Math.max(0, allRows.index(from))
+    go(allRows.at(Math.max(0,Math.min(allRows.length-1,index+delta))),col)
   }
   function startEditing(text) {
-    original.current = raw; setEditing(true)
-    if (text !== undefined && !choices) put(text)
+    original.current=raw
+    if(!choices)draft.current={row,col,original:raw,value:text ?? raw}
+    setEditing(true)
   }
   function gridKeys(event) {
     if (event.nativeEvent.isComposing || event.altKey) return
     if (event.ctrlKey || event.metaKey) {
       const key = event.key.toLowerCase()
+      if(key==='s' && editing) flushSync(()=>{if(finishDraft())setEditing(false)})
+      if(key==='p') {event.preventDefault();setPreview(true);return}
       if (!editing && ['b','i','u','z','y'].includes(key)) {
         event.preventDefault()
         if (key==='b') applyStyle({bold:!style.bold})
@@ -330,7 +325,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       return
     }
     if (editing) {
-      if (event.key === 'Escape') { event.preventDefault(); put(original.current); go(row,col) }
+      if (event.key === 'Escape') { event.preventDefault(); draft.current=null; if(choices)put(original.current); go(row,col) }
       return
     }
     if (event.key.startsWith('Arrow')) {
@@ -339,15 +334,15 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       const merge=findMerge(sheet,r,c)
       if (event.key==='ArrowRight') c=(merge?.right ?? c)+1
       if (event.key==='ArrowLeft') c=(merge?.left ?? c)-1
-      if (event.key==='ArrowDown') r=allRows[Math.min(allRows.length-1,allRows.indexOf(merge?.bottom ?? r)+1)]
-      if (event.key==='ArrowUp') r=allRows[Math.max(0,allRows.indexOf(merge?.top ?? r)-1)]
+      if (event.key==='ArrowDown') r=allRows.at(Math.min(allRows.length-1,allRows.index(merge?.bottom ?? r)+1))
+      if (event.key==='ArrowUp') r=allRows.at(Math.max(0,allRows.index(merge?.top ?? r)-1))
       go(r,c,true,event.shiftKey)
     }
     else if (event.key === 'F2') { event.preventDefault(); if (event.shiftKey) setNoteOpen(true); else startEditing() }
     else if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       const cells = {...sheet.cells}
-      for (const r of rangeRows) for (let c=range.left; c<=range.right; c++) delete cells[address(r,c)]
+      for (const r of rangeRows()) for (let c=range.left; c<=range.right; c++) delete cells[address(r,c)]
       updateSheet({...sheet,cells})
     }
     else if (event.key.length === 1) { event.preventDefault(); startEditing(event.key) }
@@ -405,7 +400,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       <button className="sheet-action" aria-label="重做表格操作" title="重做 Ctrl+Y" disabled={!history.current.future.length} onClick={()=>undo(true)}><Redo2 size={15}/></button>
     </Ribbon>
     <div className="sheet-toolbar sheet-format ribbon-panel" role="toolbar" aria-label={tab==='开始'?'选区格式':tab+'工具'}>
-      {tab==='页面布局' && <SheetPageControls sheet={sheet} range={range} apply={updateSheet}/>}
+      {tab==='页面布局' && <><SheetPageControls sheet={sheet} range={range} apply={updateSheet}/><RibbonGroup label="打印"><button onClick={()=>setPreview(true)}>打印预览</button></RibbonGroup></>}
       {tab==='数据' && <><RibbonGroup label="排序与筛选">
       <button className="sheet-action" disabled={verticalMerges} title={'按 '+columnName(col)+' 列升序排列'} onClick={()=>updateSheet({...sheet,sort:{col,desc:false}})}><ArrowDownAZ size={16}/>升序</button>
       <SheetMenu label="排序与筛选" icon={Filter}>
@@ -510,7 +505,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       </SheetMenu>
       <SheetMenu label="边框">
         {[['全部框线','all'],['外侧框线','outline'],['清除边框','none']].map(([label,mode])=>
-          <button key={mode} onClick={()=>updateSheet(changeBorders(sheet,rangeRows,range.left,range.right,mode))}>{label}</button>)}
+          <button key={mode} onClick={()=>updateSheet(changeBorders(sheet,rangeRows(),range.left,range.right,mode))}>{label}</button>)}
       </SheetMenu>
       </RibbonGroup><RibbonGroup label="编辑">
       <button onClick={()=>applyStyle({bold:false,italic:false,underline:null,strike:false,color:null,fill:null,align:null,vertical:null,wrap:null,indent:null,borders:null,font:null,size:null,numberFormat:null})}>清除格式</button>
@@ -526,7 +521,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         updateSheet({...sheet,widths})
       } else {
         const heights={...sheet.heights}
-        for (const r of rangeRows) heights[r]=size
+        for (const r of rangeRows()) heights[r]=size
         updateSheet({...sheet,heights})
       }
       setWidthEditor(false)
@@ -556,7 +551,7 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         const p=location(ref); return p.col===col && p.row>nativeFilter.box.top && p.row<=nativeFilter.box.bottom
       }).map(ref=>String(display(sheet,ref))), ''])).map(v=><option key={v} value={JSON.stringify([v])}>{v || '（空白）'}</option>)}
     </select></label><span>{rangeName(nativeFilter.box)}</span></div>}
-    <div hidden={!formulaVisible} className="sheet-formula"><output title="拖选、Shift+单击或 Shift+方向键扩展选区">{rangeName(range)}</output><span aria-hidden="true">ƒx</span>
+    <div hidden={!formulaVisible} className="sheet-formula"><input className="sheet-name-box" key={sheet.id+rangeName(range)} aria-label="名称框" title="输入单元格地址并按 Enter 定位" defaultValue={rangeName(range)} onFocus={e=>e.target.select()} onBlur={e=>{e.target.value=rangeName(range)}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();jumpTo(e.target.value)} if(e.key==='Escape')scroller.current?.focus()}}/><span aria-hidden="true">ƒx</span>
       {choices && <select aria-label="单元格下拉列表" value={raw.replace(/^'/,'')} onChange={e=>put(e.target.value)}>
         <option value="">（空白）</option>{choices.map(choice=><option key={choice} value={choice}>{choice}</option>)}</select>}
       <input aria-label="公式栏" placeholder="输入值或 =SUM(A1:A3)" maxLength={LIMITS.text} value={raw} readOnly={!!choices && ['1','true'].includes(validationAt(sheet,row,col)?.attrs.showErrorMessage)}
@@ -564,11 +559,27 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     {(filterOpen || filter) && <div className="sheet-filter"><Filter size={14}/><input autoFocus aria-label="工作表筛选" placeholder="按内容筛选，保留第一行表头" value={filter} onChange={e=>updateSheet({...sheet,query:e.target.value})}/><button onClick={()=>{updateSheet({...sheet,query:''});setFilterOpen(false)}}>清除筛选</button></div>}
     {sheet.chart && <SheetChart sheet={sheet} display={display} apply={updateSheet} />}
     <div ref={scroller} className="sheet-scroll" role="region" aria-label="工作表网格" tabIndex={0}
-      onScroll={e=>setScroll(e.currentTarget.scrollTop)} onKeyDown={gridKeys}
+      onScroll={scrollGrid} onKeyDown={gridKeys}
+      onPointerDown={e=>{
+        if(e.button!==0 || ['INPUT','SELECT'].includes(e.target.tagName)) return
+        const ref=e.target.closest('td[data-address]')?.dataset.address
+        if(!ref)return
+        e.preventDefault();drag.current=true
+        const p=location(ref);go(p.row,p.col,true,e.shiftKey)
+      }}
+      onPointerOver={e=>{
+        if(!drag.current || e.buttons!==1) return
+        const ref=e.target.closest('td[data-address]')?.dataset.address
+        if(ref){const p=location(ref);go(p.row,p.col,true,true)}
+      }}
+      onDoubleClick={e=>{
+        const ref=e.target.closest('td[data-address]')?.dataset.address
+        if(ref && !editing)startEditing()
+      }}
       onCopy={e=>{if (!editing) {
         e.preventDefault()
         const token=crypto.randomUUID()
-        clipboard.current={token, cells:copyRange(sheet,rangeRows,range.left,range.right)}
+        clipboard.current={token, cells:copyRange(sheet,rangeRows(),range.left,range.right)}
         e.clipboardData.setData('application/x-yanye-range',token)
         e.clipboardData.setData('text/plain',selectionText())
       }}}
@@ -582,38 +593,38 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
           pasteCells(matrix,internal)
         })
       }}>
-      <table aria-label={sheet.name} className={sheet.freezeColumn?'sheet-freeze-column':''} style={{width:44+widths.reduce((a,b)=>a+b,0)}}><colgroup><col style={{width:44}}/>{cols.map(c=><col key={c} style={{width:widths[c]}}/>)}</colgroup>
-        <thead><tr><th aria-label="行号"/>{cols.map(c=><th key={c} scope="col" className={c===col?'sheet-head-active':''}>{columnName(c)}{sort?.col===c?(sort.desc?' ↓':' ↑'):''}</th>)}</tr></thead>
+      <div className="sheet-extent" style={{position:'relative',width:44+columns.total,height:Math.max(30,scrollHeight)}}>
+      <table aria-label={sheet.name} className={sheet.freezeColumn?'sheet-freeze-column':''} style={{position:'absolute',left:tableLeft,top:Math.max(0,topSpace-(frozenHeaderDetached?rows.size(0):0)),width:tableWidth}}><colgroup><col style={{width:44}}/>{visibleSlots.map(({width},i)=><col key={i} style={{width}}/>)}</colgroup>
+        <thead><tr><th aria-label="行号"/>{visibleSlots.map(({col:c},i)=><th key={i} scope="col" className={c===col?'sheet-head-active':''}>{columnName(c)}{sort?.col===c?(sort.desc?' ↓':' ↑'):''}</th>)}</tr></thead>
         <tbody>
-          {first>0 && !frozenHeaderDetached && <tr aria-hidden="true"><td colSpan={cols.length+1} style={{height:offsets[first]}}/></tr>}
-          {visibleRows.map(r=><React.Fragment key={r}><tr style={{'--sheet-row-height':heights[r]+'px'}} className={sheet.freezeHeader && r===0?'sheet-frozen-row':''}><th scope="row" className={r===row?'sheet-head-active':''}>{r+1}</th>
-            {cols.map(c=>{
+          {visibleRows.map((r,i)=><React.Fragment key={i}><tr style={{'--sheet-row-height':(heights[r] || rowHeight)+'px'}} className={sheet.freezeHeader && r===0?'sheet-frozen-row':''}><th scope="row" className={r===row?'sheet-head-active':''}>{r+1}</th>
+            {visibleSlots.map(({col:c},slot)=>{
               const merge=mergeGrid.get(address(r,c))
               if (merge && !merge.first) return null
               const rr=merge?.box.top ?? r, cc=merge?.box.left ?? c
               const ref = address(rr,cc), active = rr===row && cc===col
+              const inRange=allRows.index(rr)>=selectedStart && allRows.index(rr)<=selectedEnd && c>=range.left && c<=range.right
+              if(!active && !inRange && !merge && !sheet.cells[ref] && !sheet.styles?.[ref] && !sheet.notes?.[ref] && !compiledRules.length)
+                return <td key={slot} data-address={ref} aria-label={ref}/>
               const cellStyle=sheet.styles?.[ref] ?? {}
               const result = display(sheet,ref)
               const cellNote=sheet.notes?.[ref]
-              return <td key={c} data-address={ref} data-note={cellNote?true:undefined} data-wrap={cellStyle.wrap || undefined}
-                title={cellNote?cellNote.author+'：'+cellNote.text:undefined} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
+              return <td key={slot} data-address={ref} data-note={cellNote?true:undefined} data-wrap={cellStyle.wrap || undefined}
+                title={cellNote?cellNote.author+'：'+cellNote.text:undefined} aria-label={ref} rowSpan={merge?.height} colSpan={merge?.width}
                 style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:conditionalFill(compiledRules,rr,cc,result)??cellStyle.fill,textAlign:cellStyle.align,
                   paddingInlineStart:cellStyle.indent?4+cellStyle.indent*12:undefined,verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
                   textDecorationStyle:String(cellStyle.underline).startsWith('double') ? 'double' : undefined,...cellBorders(cellStyle.borders)}}
-                className={(active?'sheet-selected ':'')+(highlighted.has(rr) && c>=range.left && c<=range.right ? 'sheet-highlight ' : '')+(typeof result==='number'?'sheet-number':'')}
-                onPointerDown={e=>{if(e.button!==0 || ['INPUT','SELECT'].includes(e.target.tagName)) return; e.preventDefault(); drag.current=true; go(rr,cc,true,e.shiftKey)}}
-                onPointerEnter={e=>{if(drag.current && e.buttons===1) go(rr,cc,true,true)}}
-                onDoubleClick={()=>{if(!editing) { original.current=sheet.cells[ref]??''; setEditing(true) }}}>
+                className={(active?'sheet-selected ':'')+(inRange ? 'sheet-highlight ' : '')+(typeof result==='number'?'sheet-number':'')}>
                 {active && editing && choices ? <select ref={editInput} aria-label={'选择 '+ref} value={raw.replace(/^'/,'')} onChange={e=>put(e.target.value)} onBlur={()=>setEditing(false)}>
                   <option value="">（空白）</option>{choices.map(choice=><option key={choice} value={choice}>{choice}</option>)}</select>
-                : active && editing ? <input ref={editInput} aria-label={'编辑 '+ref} maxLength={LIMITS.text} value={raw} onChange={e=>put(e.target.value)} onBlur={()=>setEditing(false)}/> : <span>{formatted(result,sheet.formats?.[ref])}</span>}
+                : active && editing ? <input ref={editInput} aria-label={'编辑 '+ref} maxLength={LIMITS.text} defaultValue={draft.current?.value ?? raw} onChange={e=>{if(draft.current)draft.current.value=e.target.value}} onBlur={()=>{if(finishDraft())setEditing(false)}}/> : <span>{formatted(result,sheet.formats?.[ref])}</span>}
               </td>
             })}
-          </tr>{r===0 && frozenHeaderDetached && first>1 && <tr aria-hidden="true"><td colSpan={cols.length+1} style={{height:offsets[first]-heights[0]}}/></tr>}</React.Fragment>)}
-          {last<allRows.length && <tr aria-hidden="true"><td colSpan={cols.length+1} style={{height:offsets.at(-1)-offsets[last]}}/></tr>}
+          </tr></React.Fragment>)}
         </tbody>
-      </table>
+      </table></div>
     </div>
+    {preview && <SheetPrintPreview onPrintPdf={onPrintPdf} sheet={sheet} display={display} close={()=>setPreview(false)}/>}
     <div className="sheet-tabs" aria-label="工作表列表">{book.sheets.map(s=>
       s.id===sheet.id && rename ? <input aria-label="工作表名称" autoFocus key={s.id} defaultValue={s.name} maxLength={31}
         onFocus={e=>e.target.select()} onBlur={e=>{tryAction(()=>change(renameSheet(book,s.id,e.target.value)));setRename(false)}}

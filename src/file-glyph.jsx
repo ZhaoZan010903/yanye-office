@@ -1,4 +1,5 @@
 import React from 'react'
+import { editorExtension } from '../shared/file-formats.mjs'
 
 const marks = {
   docx: <><path d="M7 9h10M7 12h7M7 15h10M7 18h6"/></>,
@@ -11,6 +12,7 @@ const marks = {
 
 // The folded sheet and inner mark identify each format at tab and tile sizes.
 export function FileGlyph({ extension, size=18 }) {
+  extension=editorExtension(extension)
   if (extension==='xlsm') extension='xlsx'
   if (!Object.hasOwn(marks,extension)) return null
   return <svg className={'file-glyph type-'+extension} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">

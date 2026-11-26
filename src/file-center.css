@@ -37,6 +37,8 @@
 .files-row span,.disk-tab span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .files-empty { margin:32px 8px; color:var(--muted); font-size:14px; }
 .files-form label { display:grid; gap:6px; font-size:13px; }.files-form input { width:100%; padding:7px 8px; border:1px solid var(--color-hairline); border-radius:4px; }
+.files-form select { min-width:0; padding:6px 8px; font:inherit; background:white; color:inherit; border:1px solid var(--color-hairline); border-radius:4px; }
+.action-list.files-format-list { max-height:60vh; overflow-y:auto; }
 .files-hint { margin:8px 0; font-size:13px; overflow-wrap:anywhere; }.files-dialog-actions { justify-content:flex-end; gap:8px; margin-top:20px; }
 .files-error,.files-feedback { color:#a43e35; font-size:13px; }.files-feedback { gap:8px; }
 .files-folders { max-height:260px; overflow:auto; margin-top:8px; }.files-folders button { display:flex; width:100%; padding:6px 8px; }.files-folders button svg:last-child { margin-left:auto; }

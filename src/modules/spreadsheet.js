@@ -1,6 +1,6 @@
 import {conditionalAggregate,ifError,vlookup} from './sheet-lookup.js'
 
-export const LIMITS = { rows: 5000, cols: 128, sheets: 32, text: 32767 }
+export const LIMITS = { rows: 1048576, cols: 16384, sheets: 32, text: 32767 }
 
 export function columnName(column) {
   let name = ''
@@ -692,7 +692,7 @@ export function parseDelimited(text, delimiter = ',', maxRows = LIMITS.rows) {
 export function writeRange(sheet, row, col, data) {
   const rows = Math.max(sheet.rows, row + data.length)
   const cols = Math.max(sheet.cols, col + data.reduce((max,line) => Math.max(max,line.length),0))
-  if (rows > LIMITS.rows || cols > LIMITS.cols) throw new Error('单表最多 5000 行、128 列。')
+  if (rows > LIMITS.rows || cols > LIMITS.cols) throw new Error('超出工作表范围（1048576 行、16384 列）。')
   const cells = { ...sheet.cells }
   data.forEach((line,r) => line.forEach((value,c) => {
     if (value.length > LIMITS.text) throw new Error('单元格最多 32767 个字符。')
@@ -719,9 +719,29 @@ export function delimitedText(rows, delimiter = ',') {
 }
 
 export function csvText(sheet, display) {
-  const points = Object.keys(sheet.cells).map(location)
-  const rowCount = points.reduce((n,p) => Math.max(n,p.row+1),1)
-  const colCount = points.reduce((n,p) => Math.max(n,p.col+1),1)
-  return delimitedText(Array.from({ length: rowCount }, (_, r) =>
-    Array.from({ length: colCount }, (_, c) => display(sheet,address(r,c)))))
+  const rows=new Map()
+  let height=1,width=1
+  for(const ref of Object.keys(sheet.cells)) {
+    const {row,col}=location(ref)
+    height=Math.max(height,row+1);width=Math.max(width,col+1)
+    if(!rows.has(row))rows.set(row,[])
+    rows.get(row).push({col,ref})
+  }
+  const budget=32*1024*1024
+  let size=height*(width-1)+(height-1)*2
+  if(size>budget) throw Error('CSV 展开后超过 32 MiB，请缩小使用区域或导出为 XLSX。')
+  const result=[],empty=','.repeat(width-1)
+  for(let r=0;r<height;r++) {
+    if(!rows.has(r)) {result.push(empty);continue}
+    let line='',previous=0
+    for(const {ref,col} of rows.get(r).sort((a,b)=>a.col-b.col)) {
+      const value=delimitedText([[display(sheet,ref)]])
+      size+=value.length
+      if(size>budget) throw Error('CSV 展开后超过 32 MiB，请缩小使用区域或导出为 XLSX。')
+      line+=','.repeat(col-previous)+value
+      previous=col
+    }
+    result.push(line+','.repeat(width-previous-1))
+  }
+  return result.join('\r\n')
 }

@@ -2,6 +2,7 @@
 
 mod exchange;
 mod files;
+mod format_conversion;
 mod markdown_assets;
 #[cfg(test)]
 mod native_tests;
@@ -61,11 +62,7 @@ impl Desktop {
                     .and_then(|s| s.to_str())
                     .unwrap_or("")
                     .to_ascii_lowercase();
-                if matches!(
-                    ext.as_str(),
-                    "docx" | "xlsx" | "xlsm" | "pptx" | "md" | "txt" | "pdf"
-                ) && p.is_file()
-                {
+                if files::OFFICE.contains(&ext.as_str()) && p.is_file() {
                     queue.push_back(p);
                 }
             }

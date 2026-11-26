@@ -4,7 +4,7 @@ import {ArrowUp,ArrowDown,CheckCheck,ListX,MessageSquarePlus} from 'lucide-react
 import {useEditorState} from '@tiptap/react'
 import {revisions,resolveRevisions} from './word-revisions.js'
 
-export default function WordRevisions({editor, enabled, toggle, author, setAuthor,reviewView,setReviewView,beginComment}) {
+export default function WordRevisions({editor, enabled, toggle, author, setAuthor,reviewView,setReviewView,beginComment,openCompare}) {
   const doc=useEditorState({editor,selector:({editor})=>editor.state.doc,equalityFn:Object.is})
   const list=useMemo(()=>revisions(doc),[doc])
   function move(step) {
@@ -25,7 +25,7 @@ export default function WordRevisions({editor, enabled, toggle, author, setAutho
       <button disabled={!list.length} onClick={()=>resolveRevisions(editor,list,false)}><ListX size={15}/>拒绝全部修订</button>
     </RibbonGroup><RibbonGroup label="定位修订">
       <button disabled={!list.length} onClick={()=>move(-1)}><ArrowUp size={15}/>上一处修订</button><button disabled={!list.length} onClick={()=>move(1)}><ArrowDown size={15}/>下一处修订</button>
-    </RibbonGroup></div>
+    </RibbonGroup><RibbonGroup label="比较"><button onClick={openCompare}>比较文档</button></RibbonGroup></div>
     {list.length>0 && <ol>{list.map(item=><li key={item.id}>
         <button title="定位修订" onClick={()=>editor.chain().focus().setTextSelection(item.spans[0].from).scrollIntoView().run()}>{item.author} · {{ins:'插入',del:'删除',format:'格式'}[item.kind]} {item.text.slice(0,60)}</button>
         <button onClick={()=>resolveRevisions(editor,[item],true)}>接受</button>

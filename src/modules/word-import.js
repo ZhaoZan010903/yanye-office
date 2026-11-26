@@ -6,6 +6,10 @@ import {defaultTextFromStyles} from './word-default-fonts.js'
 import {readNoteParts,readToc} from './word-references.js'
 import {bookmarkAnchor,bookmarkNames,paragraphFields,validBookmark,joinReferenceResults} from './word-bookmarks.js'
 
+import {namespaces,copyOfficeElement,textOf} from './word-native-object.js'
+import {equationSource} from './word-equation.js'
+import {readBox} from './word-text-box.js'
+
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 const child = (el, name) => [...(el?.children ?? [])].find(n=>n.localName === name)
@@ -248,6 +252,18 @@ export async function readDocx(base64) {
           else if(ends.has(id) && comments.has(id)) activeComments.add(id)
           continue
         }
+        if(name==='AlternateContent') {
+          const choices=[...part.children]
+          const supported=choices.find(c=>c.getElementsByTagNameNS(namespaces.wps,'txbx').length || c.getElementsByTagNameNS(namespaces.m,'oMath').length) || choices.find(c=>c.localName==='Fallback') || choices[0]
+          if(supported)await walk(supported,marks,depth+1)
+          continue
+        }
+        if(part.namespaceURI===namespaces.m && name==='oMathPara'){await walk(part,marks,depth+1);continue}
+        if(part.namespaceURI===namespaces.m && name==='oMath') {
+          try {const tree=copyOfficeElement(part);inline.push({type:'wordEquation',attrs:{tree,source:equationSource(tree),label:textOf(tree)}})}
+          catch {bookmarkIndex.protectedFields=true;warnings.add('公式中有带关系的原生对象，需要保留原版式')}
+          continue
+        }
         if (name==='pPr' || name==='rPr') continue
         if (name==='r') { await walk(part,[...marks,...inlineMarks(child(part,'rPr'))],depth+1); continue }
         if (name==='t' || name==='delText' || name==='tab' || name==='noBreakHyphen') {
@@ -260,7 +276,10 @@ export async function readDocx(base64) {
           if (attr(part,'type')==='page') pageBreak()
           else inline.push({type:'hardBreak'})
         } else if (name==='drawing') {
-          const n=await image(part); if(n) inline.push(n)
+          if(part.getElementsByTagNameNS(W,'txbxContent').length){
+            try {const box=readBox(copyOfficeElement(part));if(!box)throw Error();inline.push({type:'wordTextBox',attrs:box})}
+            catch {bookmarkIndex.protectedFields=true;warnings.add('此文本框含有图片或复杂扩展，需要保留原版式')}
+          }else {const n=await image(part);if(n)inline.push(n)}
         } else if (name==='hyperlink') {
           const rel=targets.get(part.getAttributeNS(R,'id')), anchor=attr(part,'anchor'), href=rel?.getAttribute('Target') || (validBookmark(anchor)?'#'+anchor:null)
           await walk(part,href && /^(https?:\/\/|mailto:|#)/i.test(href)?[...marks,{type:'link',attrs:{href}}]:marks,depth+1)
@@ -274,6 +293,9 @@ export async function readDocx(base64) {
           const note=noteParts.notes.get(name.replace('Reference','')+':'+attr(part,'id'))
           if(note) inline.push({type:'wordNote',attrs:note})
           else noteParts.protectedNotes=true
+        } else if(name==='pict' && part.getElementsByTagNameNS(W,'txbxContent').length){
+          bookmarkIndex.protectedFields=true
+          warnings.add('旧版 VML 文本框需使用保留原版式模式写回')
         } else if (['del','pict','object','instrText'].includes(name)) warnings.add('部分审阅标记、域或嵌入对象已略过')
       }
     }
@@ -338,6 +360,11 @@ export async function readDocx(base64) {
     return organizeLists(entries,numbers)
   }
   const settings=await partFor('settings','word/settings.xml')
+  const mergeSettings=child(settings,'mailMerge')
+  if(mergeSettings && ['dataSource','headerSource','odso','connectString','query'].some(tag=>child(mergeSettings,tag))){
+    bookmarkIndex.protectedFields=true
+    warnings.add('保留原版式模式会保留原件的邮件合并数据连接与查询')
+  }
   const textDefaults=defaultTextFromStyles(styles,await partFor('theme','word/theme/theme1.xml'),settings)
   let bandRevisions=false
   async function readSection(section) {

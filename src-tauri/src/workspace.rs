@@ -64,10 +64,9 @@ fn validate_page(p: &Value, schema: u64) -> Result<()> {
                 && disk["name"].is_string()
                 && disk["revision"].is_string()
                 && disk["dirty"].is_boolean()
-                && matches!(
-                    disk["extension"].as_str(),
-                    Some("docx" | "xlsx" | "xlsm" | "pptx" | "md" | "pdf" | "txt")
-                ),
+                && disk["extension"]
+                    .as_str()
+                    .is_some_and(|ext| crate::files::OFFICE.contains(&ext)),
             "文件绑定无效。"
         );
     }

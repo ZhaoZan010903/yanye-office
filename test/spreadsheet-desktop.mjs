@@ -43,7 +43,7 @@ try {
   assert.equal(await cell('B4').innerText(),'42')
   await cell('A1').click()
   await cell('B1').click({modifiers:['Shift']})
-  assert.equal(await page.locator('.sheet-formula output').innerText(),'A1:B1')
+  assert.equal(await page.getByLabel('名称框').inputValue(),'A1:B1')
   await page.getByRole('button',{name:'加粗选区'}).click()
   assert.equal(await cell('B1').evaluate(el=>getComputedStyle(el).fontWeight),'700')
   await page.getByLabel('选区水平对齐').selectOption('center')

@@ -1,13 +1,26 @@
 import { fieldFormat, newSlide, shapeKinds, slideBoxes, slideShape, slideThemes, textBox } from './slides-model.js'
 import { readTiming, slideTargets, writeTiming } from './slide-animations.js'
 import { parseTransition, transitionXml } from './slide-transition.js'
+import {pieces,nativeTextRuns} from './slide-runs.js'
+import {readMaster} from './slide-masters.js'
+import {attachMasters,nativeEdit,recordNative} from './slide-native-package.js'
 
 const W = 40 / 3
 const H = 7.5
 const ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
-function pageBox(box) {
-  return { x: box.x * W, y: box.y * H, w: box.w * W, h: box.h * H }
+function richText(text='',runs) {
+  if(!runs?.length)return text
+  let offset=0
+  const lines=text.split('\n')
+  return lines.flatMap((line,i)=>{
+    const parts=pieces(line,runs,offset)
+    if(!parts.length)parts.push({text:'',style:{}})
+    offset+=line.length+1
+    return parts.map((part,j)=>({text:part.text,options:{...part.style,
+      underline:part.style.underline ? {style:'sng'} : undefined,strike:part.style.strike ? 'sngStrike' : undefined,
+      breakLine:i<lines.length-1 && j===parts.length-1}}))
+  })
 }
 
 function pptText(format) {
@@ -18,36 +31,51 @@ function pptText(format) {
 
 // PptxGenJS writes only the point size on a paragraph mark. In WPS and
 // PowerPoint this makes typing at a formatted line end revert to the theme.
-// Our editor applies a single format to the whole object, including empty lines.
+// Use the final run on each line so mixed styles survive typing at the end.
 function formatParagraphMarks(xml) {
   return xml.replace(/<p:txBody>[\s\S]*?<\/p:txBody>/g, body=>{
-    const run=body.match(/<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>/)?.[0]
-    if (!run) return body
-    const mark=run.replace('<a:rPr','<a:endParaRPr').replace('</a:rPr>','</a:endParaRPr>')
-    return body.replace(/<a:endParaRPr\b[^>]*\/>/g,()=>mark)
+    let prior=''
+    return body.replace(/<a:p>[\s\S]*?<\/a:p>/g,p=>{
+      prior=Array.from(p.matchAll(/<a:rPr\b[^>]*>[\s\S]*?<\/a:rPr>/g)).at(-1)?.[0] || prior
+      if(!prior)return p
+      const mark=prior.replace('<a:rPr','<a:endParaRPr').replace('</a:rPr>','</a:endParaRPr>')
+      return p.replace(/<a:endParaRPr\b[^>]*\/>/g,()=>mark)
+    })
   })
 }
 
 export async function exportPptx(deck, name) {
   const { default: PowerPoint } = await import('pptxgenjs')
+  const {default:Zip}=await import('jszip')
+  const source=deck.native?.source && await Zip.loadAsync(deck.native.source,{base64:true})
+  if(source){
+    const updated=await nativeEdit(deck,source)
+    if(updated)return updated
+  }
   const file = new PowerPoint()
   file.layout = 'LAYOUT_WIDE'
+  const size=deck.native?.size || {w:Math.round(W*914400),h:Math.round(H*914400)}
+  if(deck.native?.size){
+    file.defineLayout({name:'Original',width:size.w/914400,height:size.h/914400})
+    file.layout='Original'
+  }
+  const geometry=box=>({x:box.x*size.w/914400,y:box.y*size.h/914400,w:box.w*size.w/914400,h:box.h*size.h/914400})
   file.title = name
   file.author = '砚页'
   file.lang = 'zh-CN'
   const theme = slideThemes[deck.theme] || slideThemes.paper
   for (const item of deck.slides) {
     const slide = file.addSlide()
-    slide.background = { color: theme.background }
+    if(!deck.masters?.length || item.background && !item.inheritBackground)slide.background = { color:item.background || theme.background }
     const boxes = slideBoxes(item.layout)
     const baseText = { fontFace: 'Microsoft YaHei', color: theme.ink, margin: 0, valign: 'top', fit: 'shrink', breakLine: false }
     for (const field of item.layout === 'columns' ? ['title','body','side'] : ['title','body']) {
       const positioned = field === 'title' && item.titleBox
-      slide.addText(item[field] || '', { ...baseText, ...pageBox(positioned || boxes[field]), ...pptText(fieldFormat(item,field,theme)),
+      slide.addText(richText(item[field],item.fieldRuns?.[field]), { ...baseText, ...geometry(positioned || boxes[field]), ...pptText(fieldFormat(item,field,theme)),
         objectName: 'YanYe ' + item.layout + (positioned ? ' positioned ' : ' ') + field })
     }
     if (item.layout === 'image' && item.image) {
-      const box = pageBox(boxes.side)
+      const box = geometry(boxes.side)
       const image = item.image
       const scale = Math.min(box.w / image.width, box.h / image.height)
       const w = image.width * scale, h = image.height * scale
@@ -55,19 +83,18 @@ export async function exportPptx(deck, name) {
     }
     if (item.notes) slide.addNotes(item.notes)
     for (const shape of item.shapes || []) {
-      slide.addText(shape.text, { ...baseText, ...pageBox(shape), shape:shape.kind, rotate:shape.rotation,
+      slide.addText(richText(shape.text,shape.runs), { ...baseText, ...geometry(shape), shape:shape.kind, rotate:shape.rotation,
         fill:{color:shape.fill}, line:{color:shape.stroke,width:1}, ...pptText(shape),
         align:shape.shapeTextAlign || 'center', valign:'middle', objectName:'YanYe shape' })
     }
     for (const box of item.textBoxes || []) {
-      slide.addText(box.text, { ...baseText, ...pageBox(box), ...pptText(box),
+      slide.addText(richText(box.text,box.runs), { ...baseText, ...geometry(box), ...pptText(box),
         fit: undefined, objectName: 'YanYe text box' })
     }
   }
   const effects=deck.slides.map(item=>transitionXml(item.transition || {}))
-  const hasFormatting=deck.slides.map(s=>Boolean(s.fieldFormats || s.titleBox || s.shapes?.length || s.textBoxes?.length))
-  if (!effects.some(Boolean) && !hasFormatting.some(Boolean) && !deck.slides.some(s=>s.animations?.length || s.nativeTiming)) return file.write({ outputType:'base64',compression:true })
-  const {default:Zip}=await import('jszip')
+  const hasFormatting=deck.slides.map(s=>Boolean(s.fieldFormats || s.fieldRuns || s.titleBox || s.shapes?.length || s.textBoxes?.length))
+  if (!deck.masters?.length && !effects.some(Boolean) && !hasFormatting.some(Boolean) && !deck.slides.some(s=>s.animations?.length || s.nativeTiming)) return file.write({ outputType:'base64',compression:true })
   const pack=await Zip.loadAsync(await file.write({ outputType:'uint8array' }))
   for (const [index,effect] of effects.entries()) {
     const item=deck.slides[index]
@@ -86,6 +113,7 @@ export async function exportPptx(deck, name) {
     if (!xml.includes('</p:clrMapOvr>')) throw new Error('无法定位幻灯片的配色映射。')
     pack.file(path,xml.replace('</p:clrMapOvr>','</p:clrMapOvr>'+effect+timing))
   }
+  await attachMasters(pack,source,deck,size)
   return pack.generateAsync({type:'base64',compression:'DEFLATE'})
 }
 
@@ -189,6 +217,15 @@ export async function importPptx(base64) {
   const slideWidth = Number(size?.getAttribute('cx')) || W * 914400
   const slideHeight = Number(size?.getAttribute('cy')) || H * 914400
   const catalog = relationships(await xml(relsPath(pres)), pres)
+  const nativeSize={w:slideWidth,h:slideHeight}, masters=[],layoutOwners=new Map()
+  for(const entry of nodes(presentation,'sldMasterId')){
+    const path=catalog.get(entry.getAttributeNS(ns,'id'))?.path
+    if(!path)continue
+    const master=readMaster((await xml(path)).documentElement,path,nativeSize)
+    const related=relationships(await xml(relsPath(path)),path)
+    master.layouts=[...related.values()].filter(r=>r.type==='slideLayout').map(r=>r.path)
+    master.layouts.forEach(p=>layoutOwners.set(p,path));masters.push(master)
+  }
   const slides = []
   let theme = 'paper'
   for (const entry of nodes(presentation, 'sldId')) {
@@ -225,7 +262,7 @@ export async function importPptx(base64) {
       if (!storedTitle && !free && !geometric) return true
       const xf = propsShape && nodes(propsShape,'xfrm')[0], off = xf && nodes(xf,'off')[0], ext = xf && nodes(xf,'ext')[0]
       if (!off || !ext) return true
-      const format = { text, x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
+      const format = { text,runs:nativeTextRuns(sp), x: Number(off.getAttribute('x'))/slideWidth, y: Number(off.getAttribute('y'))/slideHeight,
         w: Number(ext.getAttribute('cx'))/slideWidth, h: Number(ext.getAttribute('cy'))/slideHeight,
         color:slideThemes[theme].ink, ...readTextFormat(sp) }
       if (storedTitle || (plainText && !declaredTitle && !positionedTitle)) {
@@ -251,11 +288,13 @@ export async function importPptx(base64) {
     else if (rest.length===1) identify(rest[0].sp,'body')
     if (side) identify(side.sp,'side')
     if (positionedTitle) {
-      const {id,text,...format}=positionedTitle.box
+      const {id,text,runs,...format}=positionedTitle.box
       item.titleBox=format
     }
     for (const [field,object] of Object.entries({title,body:body || (rest.length===1?rest[0]:null),side})) {
       if (!object) continue
+      const rich=nativeTextRuns(object.sp)
+      if(rich.length)(item.fieldRuns ||= {})[field]=rich
       const original = readTextFormat(object.sp)
       // Exporters often omit b="0" on an unbolded, non-placeholder title.
       if (field==='title' && ownTitle.test(object.name) && original.bold===undefined) original.bold=false
@@ -289,8 +328,13 @@ export async function importPptx(base64) {
       item.notes = nodes(notesDoc, 'sp').filter(s => nodes(s, 'ph')[0]?.getAttribute('type') === 'body').map(shapeText).join('\n').trim()
     }
     Object.assign(item,readTiming(content,animationTargets))
+    const layoutPart=[...related.values()].find(r=>r.type==='slideLayout')?.path
+    item.masterId=layoutOwners.get(layoutPart) || masters[0]?.id
+    if(['0','false'].includes(content.documentElement.getAttribute('showMasterSp')))item.hideMasterShapes=true
+    if(backgroundColor)item.background=backgroundColor
+    await recordNative(item,path,layoutPart,animationTargets,slideThemes[theme])
     slides.push(item)
   }
   if (!slides.length) throw new Error('没有找到可导入的幻灯片。')
-  return { theme, slides }
+  return { theme, slides, masters, native:{source:base64,theme,size:nativeSize,order:slides.map(s=>s.native.path)} }
 }

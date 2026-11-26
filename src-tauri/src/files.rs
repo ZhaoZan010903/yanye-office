@@ -14,7 +14,10 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 const LIMIT: usize = 32 * 1024 * 1024;
-const OFFICE: &[&str] = &["docx", "xlsx", "xlsm", "pptx", "md", "txt", "pdf"];
+pub(crate) const OFFICE: &[&str] = &[
+    "docx", "doc", "odt", "rtf", "xlsx", "xlsm", "xls", "ods", "pptx", "ppt", "odp", "md", "txt",
+    "pdf",
+];
 fn extension(path: &Path) -> String {
     path.extension()
         .and_then(|s| s.to_str())
@@ -313,6 +316,7 @@ impl Library {
             && (!data.iter().take(1024).any(|b| *b == 0) || data.starts_with(&[239, 187, 191]));
         let content = match ext.as_str() {
             "pdf" => Value::Null,
+            e if crate::format_conversion::format(e).is_some() => Value::Null,
             "docx" | "xlsx" | "xlsm" | "pptx" => STANDARD.encode(&data).into(),
             "txt" if !utf8 => STANDARD.encode(&data).into(),
             _ => std::str::from_utf8(&data)
@@ -352,7 +356,8 @@ impl Library {
         );
         let bytes = decode(
             v["content"].as_str().context("文件内容无效。")?,
-            matches!(ext, "docx" | "xlsx" | "xlsm" | "pptx" | "txt"),
+            crate::format_conversion::format(ext).is_some()
+                || matches!(ext, "docx" | "xlsx" | "xlsm" | "pptx" | "txt"),
         )?;
         let id = v["id"].as_str();
         let bound = v["directory"].is_null() && v["asNew"] != true && id.is_some();
@@ -385,9 +390,12 @@ impl Library {
         let handle = previous
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let mut backup = None;
-        if exists {
+        let original = if exists {
             let old = checked_read(&p)?;
+            ensure!(
+                !crate::format_conversion::has_vba(&old, ext),
+                "此旧版文件含 VBA 项目，请另存为新文件以保留原件。"
+            );
             let hash = digest(&old);
             if bound || (v["asNew"] == true && id.is_some() && previous.as_deref() == id) {
                 ensure!(
@@ -395,7 +403,22 @@ impl Library {
                     "文件已被其他程序修改，请重新打开或另存为。"
                 );
             }
+            Some((old, hash))
+        } else {
+            None
+        };
+        let bytes = if crate::format_conversion::format(ext).is_some() {
+            crate::format_conversion::convert(&bytes, ext, false)?
+        } else {
+            bytes
+        };
+        let mut backup = None;
+        if let Some((old, hash)) = original {
             if old != bytes {
+                ensure!(
+                    digest(&checked_read(&p)?) == hash,
+                    "文件已被其他程序修改，请重新打开或另存为。"
+                );
                 let dir = self.profile.join("file-backups");
                 fs::create_dir_all(&dir)?;
                 let path = dir.join(format!("{handle}.bak"));
@@ -649,6 +672,28 @@ impl Library {
                     "所选格式与扩展名不匹配。"
                 );
                 self.open_path(&p)
+            }
+            "readConverted" => {
+                let (id, revision) = (str_arg(args, 0)?, str_arg(args, 1)?);
+                let path = &self.known(id)?.path;
+                protect(&self.profile, path)?;
+                let ext = extension(path);
+                let f = crate::format_conversion::format(&ext).context("此文件不需要格式转换。")?;
+                let bytes = checked_read(path)?;
+                ensure!(digest(&bytes) == revision, "磁盘原件已经变化，请重新打开。");
+                let modern = crate::format_conversion::convert(&bytes, &ext, true)?;
+                let mut out = json!({"extension":f.modern,"content":STANDARD.encode(&modern)});
+                if f.modern == "xlsx" {
+                    let hash = digest(&modern);
+                    let dir = self.profile.join("workbook-sources");
+                    fs::create_dir_all(&dir)?;
+                    atomic_write(
+                        &dir.join(workbook_base_name(id, &hash).context("工作簿快照名称无效。")?),
+                        &modern,
+                    )?;
+                    out["base"] = json!({"id":id,"revision":hash,"extension":"xlsx"});
+                }
+                Ok(out)
             }
             "pinWorkbookBase" | "readWorkbookBase" => {
                 let (id, revision) = (str_arg(args, 0)?, str_arg(args, 1)?);

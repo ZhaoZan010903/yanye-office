@@ -176,7 +176,7 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
       {!visible.length && <p className="files-empty" role="status">{loading ? '正在读取文件…' : filter ? '没有匹配的文件。' : recent ? '新建或打开文件后，可以在这里继续编辑。' : root ? '此文件夹为空。使用上方的入口创建办公文件或文件夹。' : '选择要管理的本地文件夹。'}</p>}
     </div>
     {modal?.type === 'choose-type' && <Dialog title="新建办公文件" onClose={() => setModal(null)}>
-      <div className="action-list">{newFileTypes.map(([ext,type]) => {
+      <div className="action-list files-format-list">{newFileTypes.map(([ext,type]) => {
         return <button key={ext} onClick={()=>show({type:'create',ext},type.initialName)}><FileGlyph extension={ext} size={20}/>{type.label}</button>
       })}</div></Dialog>}
     {modal?.type === 'actions' && <Dialog title={modal.row.name} onClose={() => setModal(null)}>

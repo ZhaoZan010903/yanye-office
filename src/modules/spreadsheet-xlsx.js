@@ -75,10 +75,12 @@ export async function readXlsx(base64) {
   const zip=await JSZip.loadAsync(bytes)
   const rules=await nativeRules(bytes,zip)
   const sheets=workbook.worksheets.map(ws => {
-    if (ws.rowCount > LIMITS.rows || ws.columnCount > LIMITS.cols) throw new Error('单表最多 5000 行、128 列。')
+    if (ws.rowCount > LIMITS.rows || ws.columnCount > LIMITS.cols) throw new Error('超出工作表范围（1048576 行、16384 列）。')
     const sheet = newSheet(ws.name)
     const native=rules.get(ws.name)
     sheet.pageSetup=readPageSetup(ws.pageSetup)
+    if(ws.properties.defaultRowHeight>0)sheet.defaultRowHeight=ws.properties.defaultRowHeight
+    if(ws.properties.defaultColWidth>0)sheet.defaultColWidth=ws.properties.defaultColWidth
     if (native?.areas) sheet.pageSetup.areas=native.areas
     if (native?.notes) {
       sheet.notes=native.notes
@@ -114,7 +116,7 @@ export async function readXlsx(base64) {
     })
     for (const row of worksheetModel.rows) {
       if (row.height > 0) {
-        if (row.number > LIMITS.rows) throw new Error('单表最多 5000 行。')
+        if (row.number > LIMITS.rows) throw new Error('超出工作表的 1048576 行范围。')
         sheet.rows=Math.max(sheet.rows,row.number)
         sheet.heights ??= {}
         sheet.heights[row.number-1]=row.height
@@ -122,7 +124,7 @@ export async function readXlsx(base64) {
     }
     for (const row of worksheetModel.rows) for (const model of row.cells) {
       const ref = model.address, pos = location(ref)
-      if (!pos || pos.col >= LIMITS.cols || pos.row >= LIMITS.rows) throw new Error('单表最多 5000 行、128 列。')
+      if (!pos || pos.col >= LIMITS.cols || pos.row >= LIMITS.rows) throw new Error('超出工作表范围（1048576 行、16384 列）。')
       const cell = ws.getCell(ref)
       sheet.rows = Math.max(sheet.rows,pos.row+1)
       sheet.cols = Math.max(sheet.cols,pos.col+1)
@@ -176,6 +178,8 @@ export async function writeXlsx(book) {
   const display = evaluator(book)
   for (const sheet of book.sheets) {
     const ws = workbook.addWorksheet(sheet.name)
+    if(sheet.defaultRowHeight)ws.properties.defaultRowHeight=sheet.defaultRowHeight
+    if(sheet.defaultColWidth)ws.properties.defaultColWidth=sheet.defaultColWidth
     if (sheet.pageSetup) {
       const {areas,printTitlesRow,printTitlesColumn,...settings}=sheet.pageSetup
       Object.assign(ws.pageSetup,settings)

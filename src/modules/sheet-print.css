@@ -1,0 +1,32 @@
+.sheet-formula .sheet-name-box { flex:0 0 96px; width:96px; font-size:12px; border-right:1px solid #e9e7e4; font-variant-numeric:tabular-nums; }
+.sheet-scroll { overflow-anchor:none; }
+.sheet-print-dialog { position:fixed; inset:0; z-index:100; display:flex; flex-direction:column; color:#37352f; background:#f7f6f3; }
+.sheet-print-dialog :is(header,footer) { display:flex; align-items:center; gap:12px; padding:8px 16px; background:#fff; }
+.sheet-print-dialog header { border-bottom:1px solid #e9e7e4; }
+.sheet-print-dialog footer { justify-content:center; border-top:1px solid #e9e7e4; flex-wrap:wrap; }
+.sheet-print-dialog header span { flex:1; }
+.sheet-print-dialog :is(button,input,select) { color:inherit; font:inherit; border:1px solid #e9e7e4; border-radius:4px; background:transparent; padding:4px 8px; }
+.sheet-print-dialog button { display:inline-flex; gap:6px; align-items:center; transition:background-color 150ms; }
+.sheet-print-dialog button:hover:enabled { background:#efedea; }
+.sheet-print-dialog button:disabled { opacity:.45; }
+.sheet-print-dialog input { width:6em; }
+.sheet-print-view { display:grid; flex:1; min-height:0; place-items:center; overflow:auto; }
+.sheet-print-batch { position:absolute; left:-200vw; top:0; visibility:hidden; pointer-events:none; }
+.sheet-print-page { background:white; outline:1px solid #e9e7e4; display:flex; flex-direction:column; box-sizing:border-box; overflow:hidden; color:black; font:11pt Calibri,"Microsoft YaHei",sans-serif; }
+.sheet-print-content { overflow:hidden; max-width:100%; max-height:100%; }
+.sheet-print-page table { table-layout:fixed; border-spacing:0; border-collapse:collapse; line-height:1.15; }
+.sheet-print-page td,.sheet-print-page th { overflow:hidden; border:none; padding:0 2px; text-overflow:clip; }
+.sheet-print-page th { font-size:10pt; height:20px; font-weight:400; border:1px solid #b1b1b1; }
+.sheet-print-page table[data-lines=true] td { border:1px solid #c9c9c9; }
+@media(prefers-reduced-motion:reduce) { .sheet-print-dialog button { transition:none; } }
+@media print {
+  html:has(.sheet-print-dialog),body:has(.sheet-print-dialog) { height:auto!important; overflow:visible!important; margin:0!important; }
+  body:has(.sheet-print-dialog) > :not(.sheet-print-dialog) { display:none!important; }
+  .sheet-print-dialog,.sheet-print-view,.sheet-print-zoom { zoom:1!important; display:block; position:static; height:auto; margin:0; padding:0; overflow:visible; background:white; }
+  .sheet-print-dialog>:is(header,footer,p) { display:none; }
+  .sheet-print-dialog:has(.sheet-print-batch) .sheet-print-view { display:none; }
+  .sheet-print-batch { position:static; visibility:visible; }
+  .sheet-print-batch .sheet-print-page { break-inside:avoid; }
+  .sheet-print-batch .sheet-print-page + .sheet-print-page { break-before:page; }
+  .sheet-print-page { outline:none; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+}

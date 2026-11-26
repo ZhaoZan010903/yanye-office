@@ -4,7 +4,9 @@ import {sectionPropertiesXml} from './word-section-xml.js'
 import {commentWriter} from './word-comments.js'
 import {createNoteParts,tocXml} from './word-references.js'
 import {bookmarkWriter,referenceXml,validBookmark} from './word-bookmarks.js'
-import {storedFieldXml} from './word-text-fields.js'
+import {storedFieldXml,serializeProperties} from './word-text-fields.js'
+import {declarations,emitOffice} from './word-native-object.js'
+import {textboxXml} from './word-text-box.js'
 export { readDocx } from './word-import.js'
 
 const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -92,9 +94,19 @@ export async function writeDocx(value) {
   const comments=commentWriter(escape)
   const notes=createNoteParts(escape)
   const bookmarks=bookmarkWriter(escape)
-  let imageCount = 0
+  let imageCount = 0, drawingId=0, hasMergeFields=false
   function inline(n) {
-    if(n.type==='wordTextField') return storedFieldXml(n.attrs,escape)
+    if(n.type==='wordMergedText'){
+      const {text,properties}=n.attrs
+      const parts=text.split(/(\t|\r\n|\r|\n)/).map(s=>s==='\t'?'<w:tab/>':/[\r\n]/.test(s)?'<w:br/>':'<w:t xml:space="preserve">'+escape(s)+'</w:t>')
+      return '<w:r>'+(properties?serializeProperties(properties,escape):runProperties(n.marks))+parts.join('')+'</w:r>'
+    }
+    if(n.type==='wordTextField') {
+      if(/^\s*MERGEFIELD\s/i.test(n.attrs.code))hasMergeFields=true
+      return storedFieldXml(n.attrs,escape,runProperties(n.marks))
+    }
+    if(n.type==='wordTextBox')return textboxXml(n.attrs,++drawingId)
+    if(n.type==='wordEquation')return emitOffice(n.attrs.tree)
     if(n.type==='wordBookmark') return bookmarks.anchor(n.attrs)
     if(n.type==='wordCrossRef') return referenceXml(n.attrs,escape)
     if (n.type==='wordNote') return notes.reference(n.attrs)
@@ -108,7 +120,7 @@ export async function writeDocx(value) {
       entries.push([rid,'image',path])
       const cx = Math.round(Math.max(1, Number(a.width) || 320)*9525), cy = Math.round(Math.max(1, Number(a.height) || 180)*9525)
       const size = ' cx="' + cx + '" cy="' + cy + '"/>'
-      return '<w:r><w:drawing><wp:inline><wp:extent' + size + '<wp:docPr id="' + i + '" name="Image ' + i + '" descr="' + escape(a.alt) + '"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext' + size + '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
+      return '<w:r><w:drawing><wp:inline><wp:extent' + size + '<wp:docPr id="' + (++drawingId) + '" name="Image ' + i + '" descr="' + escape(a.alt) + '"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Image"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext' + size + '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
     }
     const revision=n.marks?.find(m=>m.type==='wordRevision')?.attrs
     const textTag=revision?.kind==='del'?'delText':'t'
@@ -214,15 +226,14 @@ export async function writeDocx(value) {
   let body='', pending=[]
   function emitSection(nodes, settings, boundary) {
     activeLayout=sectionLayout(settings)
-    let data=nodes.map(node=>block(node)).join('')
     const section=writeSection(activeLayout)
+    let data=''
     if (boundary) {
       const last=nodes.at(-1)
       if (last?.type==='paragraph' || last?.type==='heading') {
-        const position=data.lastIndexOf('</w:pPr>')
-        data=data.slice(0,position)+section+data.slice(position)
-      } else data+='<w:p><w:pPr>'+section+'</w:pPr></w:p>'
-    }
+        data=nodes.slice(0,-1).map(node=>block(node)).join('')+block(last).replace('</w:pPr>',()=>section+'</w:pPr>')
+      } else data=nodes.map(node=>block(node)).join('')+'<w:p><w:pPr>'+section+'</w:pPr></w:p>'
+    } else data=nodes.map(node=>block(node)).join('')
     body+=data
     return section
   }
@@ -238,13 +249,13 @@ export async function writeDocx(value) {
     entries.push(['rComments','comments','comments.xml'])
     zip.file('word/comments.xml',xml+comments.body())
   }
-  if (usedEven || trackChanges || pageColor) {
+  if (usedEven || trackChanges || pageColor || hasMergeFields) {
     parts.push(['settings','settings'])
     entries.push(['rSettings','settings','settings.xml'])
-    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'">'+(pageColor?'<w:displayBackgroundShape/>':'')+(trackChanges?'<w:trackRevisions/>':'')+(usedEven?'<w:evenAndOddHeaders/>':'')+'</w:settings>')
+    zip.file('word/settings.xml',xml+'<w:settings xmlns:w="'+w+'">'+(pageColor?'<w:displayBackgroundShape/>':'')+(hasMergeFields?'<w:mailMerge><w:mainDocumentType w:val="formLetters"/><w:dataType w:val="textFile"/></w:mailMerge>':'')+(trackChanges?'<w:trackRevisions/>':'')+(usedEven?'<w:evenAndOddHeaders/>':'')+'</w:settings>')
   }
   const background = pageColor ? '<w:background w:color="'+pageColor.slice(1).toUpperCase()+'"/>' : ''
-  zip.file('word/document.xml',xml + '<w:document xmlns:w="' + w + '" xmlns:r="' + rel + '" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'+background+'<w:body>' + body + lastSection+'</w:body></w:document>')
+  zip.file('word/document.xml',xml + '<w:document'+declarations+' xmlns:r="' + rel + '" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'+background+'<w:body>' + body + lastSection+'</w:body></w:document>')
   zip.file('word/styles.xml',styles(textDefaults))
   zip.file('word/numbering.xml',numbering(lists))
   zip.file('word/_rels/document.xml.rels',relationships(entries))

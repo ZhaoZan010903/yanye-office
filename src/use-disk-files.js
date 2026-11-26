@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { addPage, isVisible, indexPages, makePage, openPage, updatePage, MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH } from '../shared/workspace.mjs'
 import { fileTitle, fileTypes, pageExtension, readOfficeFile, writeOfficeFile } from './office-files.js'
+import { conversionTargets } from '../shared/file-formats.mjs'
 
 function binding(file, confirmOverwrite = false) {
   return { id: file.id, name: file.name, extension: file.extension, revision: file.revision, dirty: false, confirmOverwrite }
@@ -21,6 +22,13 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
   const [busy, setBusy] = useState(false)
   const [epoch, setEpoch] = useState(0)
   const [encodingRequest, setEncodingRequest] = useState(null)
+  const [formatRequest, setFormatRequest] = useState(null)
+  function chooseFormat(options, current) {
+    return new Promise(resolve => setFormatRequest({options, current, finish(value) {
+      setFormatRequest(null)
+      resolve(value)
+    }}))
+  }
 
   function chooseEncoding(bytes, name) {
     return new Promise(resolve => setEncodingRequest({ bytes, name, finish(encoding) {
@@ -64,15 +72,16 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
         reveal(existing.id)
         if (revisionChanged) notify('磁盘文件已更改。当前显示保留的草稿，可另存为独立文件。')
       } else {
-        const data = await readOfficeFile(file, chooseEncoding)
+        const converted = conversionTargets[file.extension] ? await api.readConverted(file.id,file.revision) : null
+        const data = await readOfficeFile(converted || file, chooseEncoding)
         if (!data) return false
         if(data.content?.preserved) {
-          await api.pinWorkbookBase(file.id,file.revision)
-          data.content.preserved.base={id:file.id,revision:file.revision,extension:file.extension}
+          if (!converted) await api.pinWorkbookBase(file.id,file.revision)
+          data.content.preserved.base=converted?.base || {id:file.id,revision:file.revision,extension:file.extension}
         }
         if (data.markdown?.length > MAX_MARKDOWN_LENGTH) throw new Error('Markdown 文件超过单页字符上限。')
         const page = existing ?? makePage({ title, kind: type.kind })
-        const fields = { ...data, title, disk: binding(file, ['docx','xlsx','xlsm','pptx'].includes(file.extension)) }
+        const fields = { ...data, title, disk: binding(file, ['word','spreadsheet','presentation'].includes(type.kind)) }
         const ok = change(current => {
           if (!existing) return addPage(releaseOtherBindings(current,page.id,file.id), { ...page, ...fields })
           const now = current.pages.find(p=>p.id===page.id)
@@ -157,7 +166,15 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     }
     return run(async () => {
       if (page.disk && !page.disk.dirty && !asNew) { notify('当前文件已保存。'); return true }
-      const extension = pageExtension(page)
+      let extension = pageExtension(page)
+      if (asNew && ['word','spreadsheet','presentation'].includes(page.kind) && extension!=='xlsm') {
+        const options=Object.entries(fileTypes).filter(([,type])=>type.kind===page.kind && !type.openOnly)
+        extension=await chooseFormat(options,extension)
+        if (!extension) return false
+      }
+      if (extension==='xls' && page.content?.sheets?.some(sheet=>sheet.rows>65536 || sheet.cols>256)) {
+        throw new Error('此工作簿超出 XLS 的 65,536 行或 256 列，请另存为 XLSX 以保留完整数据。')
+      }
       let convertText = false, content
       const alternateMapping = extension==='txt' && page.content?.noncanonicalEncoding &&
         page.content.noncanonicalEncoding===page.content.encoding
@@ -202,5 +219,5 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     })
   }
 
-  return { busy, epoch, openFile, openLaunchFiles, createFile, saveFile, encodingRequest }
+  return { busy, epoch, openFile, openLaunchFiles, createFile, saveFile, encodingRequest, formatRequest }
 }

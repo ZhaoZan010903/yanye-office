@@ -18,6 +18,8 @@ import WordOutlineView from './WordOutlineView.jsx'
 import {WordLineControls,WordLineNumbers} from './WordLineNumbers.jsx'
 import WordComments,{WordComment} from './WordComments.jsx'
 import WordRevisions from './WordRevisions.jsx'
+import {WordEquation,WordTextBox,WordObjectPanel,WordObjectTools} from './WordObjects.jsx'
+import {MergeWordPanel,CompareWordPanel} from './WordWorkflows.jsx'
 import {currentSection, revisionAction, revisions,reviewTransaction, SectionBreak, WordRevision} from './word-revisions.js'
 import {sectionPrintModel} from './word-section-print.js'
 import FontPicker from './FontPicker.jsx'
@@ -102,7 +104,7 @@ const LocalImage=Image.extend({
   renderHTML({HTMLAttributes}) { return ['img',mergeAttributes(HTMLAttributes,{draggable:'false'})] },
 }).configure({allowBase64:true,inline:true})
 
-const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,WordComment,WordNote,WordToc,WordBookmark,WordCrossRef,WordTextField,ParagraphFormat,PageBreak,SectionBreak,LocalImage,TableKit]
+const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,WordEquation,WordTextBox,WordComment,WordNote,WordToc,WordBookmark,WordCrossRef,WordTextField,ParagraphFormat,PageBreak,SectionBreak,LocalImage,TableKit]
 const pointNames={42:'初号',36:'小初',26:'一号',24:'小一',22:'二号',18:'小二',16:'三号',15:'小三',14:'四号',12:'小四',10.5:'五号',9:'小五',7.5:'六号',6.5:'小六',5.5:'七号',5:'八号'}
 const sizes=[8,10,11,20,28,32,48,72,...Object.keys(pointNames).map(Number)]
 const aligns=[['left','左对齐',AlignLeft],['center','居中对齐',AlignCenter],['right','右对齐',AlignRight],['justify','两端对齐',AlignJustify]]
@@ -121,7 +123,7 @@ function imageFile(file) {
   })
 }
 
-export default function Word({value, onChange, onPrintPdf, title}) {
+export default function Word({value, onChange, onPrintPdf, onExport, title}) {
   const current=wordValue(value)
   const [revisionAuthor,setRevisionAuthor]=useState(()=>localStorage.getItem('word-revision-author') || '本机用户')
   const revisionSettings=useRef({})
@@ -143,6 +145,10 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   const editor=useEditor({
     extensions:[...extensions,WordRevision.configure({settings:()=>revisionSettings.current,report:setMessage})],content:current.doc,
     editorProps:{attributes:{class:'word-prose',role:'textbox','aria-label':'Word 文档正文','aria-multiline':'true'},
+      handleDoubleClickOn(_view,_pos,node,nodePos,event) {
+        if(!['wordEquation','wordTextBox'].includes(node.type.name))return false
+        event.preventDefault();setDialog({type:node.type.name,node,pos:nodePos});return true
+      },
       handleClick(view,_pos,event) {
         if(!event.ctrlKey && !event.metaKey)return false
         const element=event.target.closest?.('[data-word-cross-ref],a[href^="#"]')
@@ -372,8 +378,11 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         </RibbonGroup><RibbonGroup label="插图和分页">
         <Action label="插入图片" icon={ImagePlus} onClick={()=>fileRef.current.click()}/>
         <Action label="插入分页符" onClick={()=>run('insertContent',{type:'pageBreak'})}/>
-      </RibbonGroup><WordInsertExtras editor={editor} setDialog={setDialog} onComment={beginComment}/></>}
-      {tab==='引用' && <><WordReferenceTools editor={editor} outline={outline} dialog={dialog} setDialog={setDialog}/><WordCrossRefTools editor={editor} onClick={()=>setDialog({type:'cross'})} report={setMessage}/></>}
+      </RibbonGroup><WordObjectTools open={type=>{
+        const {node,from}=editor.state.selection
+        setDialog(node?.type.name===type?{type,node,pos:from}:{type})
+      }}/><WordInsertExtras editor={editor} setDialog={setDialog} onComment={beginComment}/></>}
+      {tab==='引用' && <><WordReferenceTools editor={editor} outline={outline} dialog={dialog} setDialog={setDialog}/><WordCrossRefTools editor={editor} onClick={()=>setDialog({type:'cross'})} report={setMessage}/><RibbonGroup label="邮件"><button onClick={()=>setDialog({type:'merge'})}>邮件合并</button></RibbonGroup></>}
       {tab==='页面' && <><RibbonGroup label="页边距">
         <div className="word-margin-fields">{[['top','上'],['bottom','下'],['left','左'],['right','右']].map(([key,label])=><MarginInput key={key} side={key} label={label} mm={layout[key]} onChange={changeLayout}/>)}</div>
       </RibbonGroup><RibbonGroup label="段落间距">
@@ -416,11 +425,14 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         <Action label="跳至文末" onClick={()=>editor.commands.focus('end')}/>
       </RibbonGroup></>}
     </div>}
+    {['wordTextBox','wordEquation'].includes(dialog?.type) && <WordObjectPanel key={dialog.type+'-'+(dialog.pos??'new')} editor={editor} dialog={dialog} close={()=>setDialog(null)}/>}
+    {dialog?.type==='merge' && <MergeWordPanel editor={editor} document={current} title={title} onExport={onExport} close={()=>setDialog(null)}/>}
+    {dialog?.type==='compare' && <CompareWordPanel original={dialog.original} onExport={onExport} close={()=>setDialog(null)}/>}
     {bandsOpen && tab==='插入' && <WordBands layout={layout} localBands={activeLayout.bands} hasPrevious={section.index>1} onChange={changeLayout}/>}
     {dialog?.kind && <WordNoteForm editor={editor} dialog={dialog} setDialog={setDialog}/>}
     {dialog?.type==='link' && <WordLinkForm editor={editor} dialog={dialog} setDialog={setDialog}/>}
     {['bookmarks','cross'].includes(dialog?.type) && <WordBookmarkPanel key={dialog.type} editor={editor} cross={dialog.type==='cross'} close={()=>setDialog(null)}/>}
-    {tab==='审阅' && <><WordRevisions editor={editor} beginComment={beginComment} enabled={!!current.trackChanges} author={revisionAuthor} reviewView={reviewView} setReviewView={setReviewView}
+    {tab==='审阅' && <><WordRevisions editor={editor} openCompare={()=>setDialog({type:'compare',original:current})} beginComment={beginComment} enabled={!!current.trackChanges} author={revisionAuthor} reviewView={reviewView} setReviewView={setReviewView}
       toggle={enabled=>onChange({...latest.current,trackChanges:enabled})} setAuthor={name=>{setRevisionAuthor(name);localStorage.setItem('word-revision-author',name)}}/>
       <WordComments editor={editor}/></>}
     {searching && <div className="word-find"><input ref={searchRef} aria-label="查找文字" placeholder="查找文字" value={term} onChange={e=>setTerm(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')search('next')}}/>

@@ -11,6 +11,7 @@ import OfficeFileBar from './office/OfficeFileBar.jsx'
 import { FileCenter } from './FileCenter.jsx'
 import { fileTitle, pageExtension } from './office-files.js'
 import { useDiskFiles } from './use-disk-files.js'
+import { conversionTargets } from '../shared/file-formats.mjs'
 import { Breadcrumbs, Dialog, EmptyWorkspace, IconButton, PageIcon, SearchDialog, Sidebar, TrashDialog } from './workspace-ui.jsx'
 
 const desktop = window.yanye
@@ -25,7 +26,7 @@ function errorText(error) {
 function OfficeFileDetails({ disk }) {
   const [features,setFeatures] = useState([])
   useEffect(() => {
-    if (!disk) return
+    if (!disk || conversionTargets[disk.extension]) return
     let active=true
     async function load() {
       const { inspectOriginal } = await import('./modules/office-original.js')
@@ -344,7 +345,9 @@ export function App() {
     </Dialog>}
     {modal?.type === 'confirm-write' && <Dialog title="保存到原 Office 文件" onClose={closeModal}>
       <OfficeFileDetails disk={byId.get(modal.id)?.disk}/>
-      {byId.get(modal.id)?.content?.preserved
+      {conversionTargets[byId.get(modal.id)?.disk?.extension]
+        ? <p>此格式由本地引擎转换。旧格式可能改变公式、母版或其他高级对象的表现。覆盖前会备份上一次的文件，也可以另存为现代 Office 格式。</p>
+        : byId.get(modal.id)?.content?.preserved
         ? <p>砚页会在原工作簿上写入已改动的单元格，并标记重新计算。VBA 项目和其他对象保留原部件。覆盖前的文件保存在本地用户目录的 file-backups 中。</p>
         : <p>砚页会按支持的格式重新生成文件。修订、宏、复杂图形或特殊版式可能发生变化。覆盖前会在本地用户目录的 file-backups 中备份上一次的文件。</p>}
       <div className="files-dialog-actions"><button className="button" onClick={closeModal}>取消</button>
@@ -352,6 +355,14 @@ export function App() {
         <button className="button primary" onClick={() => {closeModal();files.saveFile(modal.id,false,true).catch(handleFileError)}}>备份并保存原文件</button></div>
     </Dialog>}
     <TextEncodingDialog request={files.encodingRequest}/>
+    {files.formatRequest && <Dialog title="另存为" onClose={()=>files.formatRequest.finish(null)}>
+      <form className="files-form" onSubmit={e=>{e.preventDefault();files.formatRequest.finish(e.currentTarget.elements.format.value)}}>
+        <label>文件格式<select name="format" autoFocus defaultValue={files.formatRequest.current}>
+          {files.formatRequest.options.map(([ext,type])=><option key={ext} value={ext}>{type.label}（.{ext}）</option>)}
+        </select></label>
+        <div className="files-dialog-actions"><button className="button" type="button" onClick={()=>files.formatRequest.finish(null)}>取消</button>
+          <button className="button primary" type="submit">选择保存位置</button></div>
+      </form></Dialog>}
     {modal?.type === 'new' && <Dialog title="新建工作区文稿" onClose={closeModal}>
       <div className="action-list">{Object.entries(workspaceKinds).map(([kind, label]) =>
         <button type="button" key={kind} onClick={() => create(modal.parentId, kind)}><PageIcon page={{ kind }} />{label}</button>)}</div>

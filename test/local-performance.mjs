@@ -8,11 +8,12 @@ import { addPage, initialWorkspace, makePage } from '../shared/workspace.mjs'
 import { WorkspaceDatabase } from '../electron/workspace-database.mjs'
 import { createHash } from 'node:crypto'
 
-// node test/local-performance.mjs path/to/YanYe.exe [output.json] [--extended | --input]
+// node test/local-performance.mjs path/to/YanYe.exe [output.json] [--extended | --input | --tabs]
 const exe = resolve(process.argv[2] || 'release/YanYe-win32-x64/YanYe.exe')
 const temp = await mkdtemp(join(tmpdir(), 'yanye-local-perf-'))
 const profile = join(temp, 'profile')
 const extended = process.argv.includes('--extended')
+const tabsOnly = process.argv.includes('--tabs')
 const results = {}
 const samples = {}
 let app, page
@@ -155,18 +156,27 @@ async function sampleTabs() {
   }
   for (let i = 0; i < 200; i++) {
     const name = i % 2 ? '评审' : '周报'
-    const elapsed = await page.evaluate(async name => {
+    const timing = await page.evaluate(async ({name,trace}) => {
       const button = [...document.querySelectorAll('.disk-tab button')].find(b => b.title === name + '.md')
       const start = performance.now()
       button.click()
+      const dispatched = trace ? performance.now() : 0
+      let firstFrame
       for (let n = 0; n < 180; n++) {
         await new Promise(resolve => requestAnimationFrame(resolve))
+        if (trace && n === 0) firstFrame = performance.now()
         const editor = document.querySelector('.writing-area')
-        if (editor?.isContentEditable && editor.querySelector('h2')?.textContent === name) return performance.now() - start
+        if (editor?.isContentEditable && editor.querySelector('h2')?.textContent === name) {
+          const ready = performance.now()
+          return {tabSwitchMs:ready-start, ...(trace ? {
+            tabClickDispatchMs:dispatched-start, tabWaitFirstFrameMs:firstFrame-dispatched,
+            tabFirstFrameToReadyMs:ready-firstFrame, tabFramesToReady:n+1,
+          } : {})}
+        }
       }
       throw new Error('标签切换后未找到正确正文')
-    }, name)
-    record('tabSwitchMs', elapsed)
+    }, {name,trace:tabsOnly})
+    for (const [metric,value] of Object.entries(timing)) record(metric,value)
   }
 }
 
@@ -262,9 +272,15 @@ try {
     await launch(false)
     await openDocument()
     await sampleLongSession()
+  } else if (tabsOnly) {
+    await launch(false)
+    await openDocument()
+    await page.bringToFront()
+    await sampleTabs()
   } else if (process.argv.includes('--input')) {
     await launch(false)
     await openDocument()
+    await page.bringToFront()
     await sampleInput()
     await sampleKeyFrames()
   } else {
@@ -280,6 +296,6 @@ try {
   const fixture = {characters:markdown.length, sha256:createHash('sha256').update(markdown).digest('hex')}
   const machine = {cpu:cpus()[0].model, os:release(), arch:arch(), memoryGiB:+(totalmem()/2**30).toFixed(1)}
   const asarSha256 = createHash('sha256').update(await readFile(join(dirname(exe),'resources','app.asar'))).digest('hex')
-  if (process.argv[3] && process.argv[3] !== '--extended') await writeFile(resolve(process.argv[3]), JSON.stringify({fixture, machine, asarSha256, results, samples}, null, 2) + '\n')
+  if (process.argv[3] && !process.argv[3].startsWith('--')) await writeFile(resolve(process.argv[3]), JSON.stringify({fixture, machine, asarSha256, results, samples}, null, 2) + '\n')
   if (dirname(temp) === tmpdir() && basename(temp).startsWith('yanye-local-perf-')) await rm(temp, {recursive:true, force:true, maxRetries:5})
 }

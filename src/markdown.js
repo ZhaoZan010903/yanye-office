@@ -1,3 +1,10 @@
+export function preferDiskSource(page) {
+  if (page.disk?.extension!=='md') return false
+  const size=256*1024, text=page.markdown
+  if (text.length>=size) return true
+  return text.length*3>=size && new TextEncoder().encode(text).length>=size
+}
+
 export function describeSource(markdown) {
   const normalized = markdown.replace(/\r\n?/gu, '\n')
   const lines = normalized.split('\n')

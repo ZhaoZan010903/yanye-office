@@ -18,6 +18,8 @@ export default function MarkdownFind({ editor, sourceRef, source, replacing, clo
     setIndex(i)
     if (source !== null) {
       const text=sourceRef.current
+      if(!text) return
+      if(text.selectSource) {text.selectSource(from,to);return}
       text.focus(); text.setSelectionRange(from,to)
       const line=source.slice(0,from).split('\n').length-1
       text.scrollTop=Math.max(0, line*parseFloat(getComputedStyle(text).lineHeight)-text.clientHeight/2)
@@ -30,6 +32,8 @@ export default function MarkdownFind({ editor, sourceRef, source, replacing, clo
     if (!matches.length || (all && matches.length>10000)) return
     const selected=all ? matches : [matches[Math.max(0,current)]]
     if (source !== null) {
+      if(!sourceRef.current) return
+      if(sourceRef.current.replaceRanges) {sourceRef.current.replaceRanges(selected,replacement);return}
       const text=sourceRef.current, first=selected[0].from, last=selected.at(-1).to
       let insert='', end=first
       for (const match of selected) { insert+=source.slice(end,match.from)+replacement; end=match.to }

@@ -31,10 +31,10 @@
 | WPS 文字、Microsoft Word | WPS DOCX `ev_014f4eef4a5d`、Word DOCX `ev_a48e63303d35`。页眉与页脚由节属性引用，PAGE 的指令、显示值及结束标记可拆成多个文字运行。批注样本 `ev_37203c272853`、`ev_7fc94b0f2712` 用于核对正文锚点与批注部件 |
 | WPS 表格、Microsoft Excel | XLSX `ev_14757b3b0dbb`、`ev_372543382771`，图表样本 `ev_31d5310b29f8`、`ev_9dee99fb98bf`。读取验证规则、条件格式、筛选条件和图表系列的原生区域引用 |
 | WPS 演示、Microsoft PowerPoint | WPS 12.1.0.29690、PowerPoint 16.0.20625.20108。本机 PowerPoint 的淡化、三秒换页样本 `ev_bb5ba1fb5efe`，其中包含 `p:fade`、`spd` 和 `advTm`。回读测试将其改为切入、半秒换页，并检查几何对象和字体 |
-| WPS PDF | 12.1.0.29690。核对了本机入口文件及 PDF 模块元数据。编辑后的 PDF 在 PDF.js 中回读，并由 Poppler 独立栅格化，核对两页、90° 旋转和文字高亮。WPS PDF 本机自动化入口返回 `0x80080005` |
+| WPS PDF | 12.1.0.29690。核对了本机入口文件及 PDF 模块元数据。编辑后的两页副本在 WPS PDF 普通窗口、PDF.js 及 Poppler 中核对。WPS 显示原第 2 页旋转 90° 后排在首页，高亮覆盖对应文字，双击便签读回作者「砚页」和正文「第二页核对」 |
 | Typora、Notepad++ | Typora 1.14.15 `ev_3a2cfe423832`、Notepad++ 8.9.9.1 `ev_10f9ca4331b1`。核对标题、写作模式、查找、书签及复制行命令。[Typora 官方快捷键](https://support.typora.io/Shortcut-Keys/) · [Notepad++ 取样版本](https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.9.1) |
 
-工具条分组和有色图形参考 [GenOffice](https://github.com/genspark-ai/genoffice/tree/a6ff5ffd95cd8502ef3d9ddc2523b65e06253fe4)。六种文件标识采用原创折页图形与不同内部笔画，应用外壳沿用米纸、墨色和 1px 细分隔。悬停在 150ms 内改变颜色，Windows 的减少动态效果设置也作用于放映淡化。图表配色仅由文稿作者设置。
+工具条分组和有色图形参考 [GenOffice](https://github.com/genspark-ai/genoffice/tree/a6ff5ffd95cd8502ef3d9ddc2523b65e06253fe4)。六种文件标识采用原创折页图形与不同内部笔画，应用外壳沿用米纸、墨色和 1px 细分隔。悬停在 150ms 内改变颜色，Windows 的减少动态效果设置也作用于放映淡化。作者可为图表选择配色，系列同时使用图例标识。
 
 ## 判定能否替代原应用
 
@@ -53,7 +53,7 @@
 
 ## 发布包验收
 
-Windows x64 便携版产品版本为 0.5.0。打包后的 `app.asar` SHA-256 为 `18bb01c25ad8a60c719037e42c201d989180493a495ef7d15fc1bf5587d8b66f`。三份格式替换副本分别由 Microsoft Word/Excel/PowerPoint 和 WPS 文字/表格/演示打开，确认正文与域、单元格值与公式、演示文本框。另用 Word/WPS 核对段内批注的作者、范围和内容，Excel/WPS 核对图表引用、条件和重算值，PowerPoint/WPS 核对可编辑的形状、颜色和切换效果。Markdown、TXT、迁移和强杀恢复均使用同一便携版及隔离的本机目录验证。
+Windows x64 便携版产品版本为 0.5.0。打包后的 `app.asar` SHA-256 为 `1058263f497f2b373c24b7339d8310bd8ad73521a25cc6698900a5cf927d7d2e`。三份格式替换副本分别由 Microsoft Word/Excel/PowerPoint 和 WPS 文字/表格/演示打开，确认正文与域、单元格值与公式、演示文本框。另用 Word/WPS 核对段内批注的作者、范围和内容，Excel/WPS 核对图表引用、条件和重算值，PowerPoint/WPS 核对可编辑的形状、颜色和切换效果。Markdown、TXT、迁移和强杀恢复均使用同一便携版及隔离的本机目录验证。
 
 ## 复验
 

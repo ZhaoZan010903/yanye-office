@@ -24,6 +24,7 @@ export function editSource(raw, next) {
   return raw.slice(0,a) + next.slice(first,next.length-tail).replace(/\n/g,()=>separators[i++] ?? fallback) + raw.slice(b)
 }
 
+
 export function markdownMatches(value, query, caseSensitive) {
   if (!query) return []
   const pattern = new RegExp(RegExp.escape(query), caseSensitive?'gu':'giu')

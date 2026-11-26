@@ -3,7 +3,7 @@ import test from 'node:test'
 import { Schema } from '@tiptap/pm/model'
 import { history, redo, undo } from '@codemirror/commands'
 import { EditorSelection, Transaction } from '@codemirror/state'
-import { describeSource } from '../src/markdown.js'
+import { describeSource, preferDiskSource } from '../src/markdown.js'
 import { markdownFigures } from '../src/markdown-figures.js'
 import { editSource, editorSource, markdownMatches } from '../src/markdown-search.js'
 import { bookmarks, editLines, jumpBookmark, restoreBookmarks, toggleBookmark } from '../src/modules/txt-commands.js'
@@ -24,6 +24,14 @@ function openText(bytes) {
     },
   }
 }
+
+test('large disk Markdown uses UTF-8 bytes for its initial editing mode',()=>{
+  const page={disk:{extension:'md'},markdown:'界'.repeat(87381)}
+  assert.equal(preferDiskSource(page),false)
+  page.markdown+='a'
+  assert.equal(preferDiskSource(page),true)
+  assert.equal(preferDiskSource({...page,disk:null}),false)
+})
 
 test('Markdown search covers words across marks and stops at objects and paragraph boundaries',()=>{
   const schema=new Schema({nodes:{doc:{content:'paragraph+'},paragraph:{content:'inline*'},text:{group:'inline'},image:{inline:true,group:'inline'}},marks:{bold:{}}})

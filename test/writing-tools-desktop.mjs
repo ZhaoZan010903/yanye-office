@@ -13,6 +13,9 @@ const mixed='# 目录\r\n\r\n$$\nx^2 + y^2\n$$\r\n\r\n```mermaid\r\nflowchart LR
 const txt=Buffer.from('\uFEFFb2\r\na\nb2\r末')
 const legacy=join(temp,'原编码.txt'),gbCopy=join(temp,'原编码副本.txt'),utfCopy=join(temp,'独立 UTF8.txt')
 const oldBytes=Buffer.from('d6d0cec40d0abcc7c2bc','hex')
+const largeFile=join(temp,'长稿.md')
+const largeRaw='---\r\ntitle: 长稿\r\n---\r\n# 前记\r\n\r\n原句。\n\n$$\rx^2 + y^2\r$$\r\n\r\n```text\n'+
+  '本地文本 / reading line\n'.repeat(12500)+'```\r\n\r\n# 终卷\r\n\n原句。'
 const errors=[]
 let app,page
 const button=name=>page.getByRole('button',{name,exact:true})
@@ -37,7 +40,7 @@ async function savedBytes(path,expected) {
   assert.deepEqual(await readFile(path),expected)
 }
 try {
-  await Promise.all([writeFile(markdown,'# 文稿\n\n首段**稿件**，稿件。\n\n末段'), writeFile(source,mixed),writeFile(plain,txt),writeFile(legacy,oldBytes)])
+  await Promise.all([writeFile(markdown,'# 文稿\n\n首段**稿件**，稿件。\n\n末段'), writeFile(source,mixed),writeFile(plain,txt),writeFile(legacy,oldBytes),writeFile(largeFile,largeRaw)])
   const exe=process.argv[2] ? resolve(process.argv[2]) : createRequire(import.meta.url)('electron')
   app=await _electron.launch({executablePath:exe,args:process.argv[2]?[]:[root],env:{...process.env,YANYE_PROFILE:join(temp,'profile')}})
   page=await app.firstWindow()
@@ -163,6 +166,48 @@ try {
   assert.deepEqual(await readFile(utfCopy),Buffer.from('中文\r\n记录新😀'))
   assert.deepEqual(await readFile(legacy),edited)
   assert.deepEqual(await readFile(gbCopy),edited)
+  await button('返回文件中心').click()
+  await page.evaluate(()=>{
+    window.immediateRichAttempt=new Promise(resolve=>{
+      const observer=new MutationObserver(()=>{
+        if (!document.querySelector('.md-source-large')) return
+        observer.disconnect()
+        const rich=[...document.querySelectorAll('.mode-switch button')].find(el=>el.textContent==='富文本')
+        rich.click()
+        resolve()
+      })
+      observer.observe(document.body,{childList:true,subtree:true})
+    })
+  })
+  await open(largeFile)
+  await page.evaluate(()=>window.immediateRichAttempt)
+  const virtual=label('Markdown 源码')
+  await virtual.waitFor()
+  assert.equal(await virtual.getAttribute('contenteditable'),'true')
+  await button('终卷').click()
+  await virtual.getByText('# 终卷',{exact:true}).waitFor()
+  await virtual.press('Control+h')
+  await label('查找文字').fill('原句')
+  await label('替换文字').fill('校订')
+  await button('全部替换').click()
+  await savedBytes(largeFile,Buffer.from(largeRaw.replaceAll('原句','校订')))
+  await button('关闭查找').click()
+  await virtual.press('Control+z')
+  await savedBytes(largeFile,Buffer.from(largeRaw))
+  await button('阅读').click()
+  const formula=label('Markdown 阅读正文').getByRole('button',{name:/编辑第 .*行公式源码/})
+  await page.locator('.md-reading .md-block-slot').first().scrollIntoViewIfNeeded()
+  await formula.click()
+  const selected=await virtual.evaluate(el=>{
+    const data=new DataTransfer()
+    el.dispatchEvent(new ClipboardEvent('copy',{bubbles:true,cancelable:true,clipboardData:data}))
+    return data.getData('text/plain')
+  })
+  assert.equal(selected,'x^2 + y^2')
+  await page.keyboard.insertText('z^2')
+  await savedBytes(largeFile,Buffer.from(largeRaw.replace('x^2 + y^2','z^2')))
+  await virtual.press('Control+z')
+  await savedBytes(largeFile,Buffer.from(largeRaw))
   assert.deepEqual(errors,[])
   console.log('Windows Electron offline writing checks passed: Markdown writing modes and rendering, TXT format undo, byte-accurate GBK overwrite, original-encoding Save As, cancellation, protected UTF-8 fallback.')
 } finally {

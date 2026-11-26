@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, pageTitle } from '../shared/workspace.mjs'
 import { blocks, BlockChoices, runBlock, slashBlocks } from './blocks.jsx'
-import { describeDocument, describeSource } from './markdown.js'
+import { describeDocument, describeSource, preferDiskSource } from './markdown.js'
 import MarkdownFind from './MarkdownFind.jsx'
 import { editSource, editorSource } from './markdown-search.js'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
@@ -24,6 +24,7 @@ import './modules/writing-tools.css'
 
 const MarkdownFigures=lazy(()=>import('./MarkdownFigures.jsx'))
 const MarkdownReading=lazy(()=>import('./MarkdownReading.jsx'))
+const LargeMarkdownSource=lazy(()=>import('./LargeMarkdownSource.jsx'))
 const focusBlock = active => Extension.create({
   name:'writingFocus',
   addProseMirrorPlugins() {
@@ -170,9 +171,26 @@ export function DocumentEditor({
   page, children: childPages, focusTitle, saveState, onSave, contextOpen, onContextToggle, onChange, onOpenPage,
   onCreateChild, onFavorite, onExport, onMenu, onExternalLink,
 }) {
-  const [initialSource] = useState(() => describeSource(page.markdown))
-  const [mode, setMode] = useState(() => initialSource.sourceOnly ? 'source' : 'rich')
-  const sourceInfo = useMemo(() => mode !== 'rich' ? describeSource(page.markdown) : null, [mode, page.markdown])
+  const [largeDiskFile]=useState(()=>preferDiskSource(page))
+  const [initialSource] = useState(() => largeDiskFile ? {headings:[],characters:0,completed:0,total:0,sourceOnly:false} : describeSource(page.markdown))
+  const [mode, setMode] = useState(() => initialSource.sourceOnly || largeDiskFile ? 'source' : 'rich')
+  const parsedSource=useRef({raw:largeDiskFile?null:page.markdown,info:initialSource})
+  const [largeOutline,setLargeOutline]=useState(initialSource)
+  useEffect(()=>{
+    if (!largeDiskFile || mode==='rich' || parsedSource.current.raw===page.markdown) return
+    const timer=setTimeout(()=>{
+      const info=describeSource(page.markdown)
+      parsedSource.current={raw:page.markdown,info}
+      setLargeOutline(info)
+    },350)
+    return ()=>clearTimeout(timer)
+  },[largeDiskFile,mode,page.markdown])
+  const sourceInfo = useMemo(() => {
+    if(mode==='rich') return null
+    if(largeDiskFile) return largeOutline
+    if(parsedSource.current.raw!==page.markdown) parsedSource.current={raw:page.markdown,info:describeSource(page.markdown)}
+    return parsedSource.current.info
+  }, [mode, page.markdown,largeDiskFile,largeOutline])
   const [selectedHeading, setSelectedHeading] = useState(null)
   const [find,setFind]=useState(null), [figures,setFigures]=useState(false)
   const [focus,setFocus]=useState(false), [typewriter,setTypewriter]=useState(false)
@@ -180,7 +198,8 @@ export function DocumentEditor({
   const titleInput = useRef(null)
   const sourceInput = useRef(null)
   const editTarget=useRef(null)
-  const lastRichText = useRef(initialSource.sourceOnly ? '' : page.markdown)
+  const sourceSelection=useRef(null)
+  const lastRichText = useRef(initialSource.sourceOnly || largeDiskFile ? '' : page.markdown)
   const handlers = useRef({ onCreateChild, onExternalLink, onChange })
   handlers.current = { onCreateChild, onExternalLink, onChange }
 
@@ -299,7 +318,16 @@ export function DocumentEditor({
   }, [focusTitle])
 
   function switchMode(next) {
-    if (next === mode || (next === 'rich' && (sourceInfo?.sourceOnly || !editor))) return
+    if(next===mode) return
+    if(next==='rich') {
+      const current=largeDiskFile && parsedSource.current.raw!==page.markdown ? describeSource(page.markdown) : sourceInfo
+      if (current?.sourceOnly || !editor) return
+    }
+    if (mode==='source' && sourceInput.current) {
+      const text=sourceInput.current
+      sourceSelection.current=text.selectedSource ? text.selectedSource() :
+        {start:text.selectionStart,end:text.selectionEnd,direction:text.selectionDirection,scroll:text.scrollTop}
+    }
     if (next === 'rich' && lastRichText.current !== page.markdown) {
       editor.commands.setContent(page.markdown, { contentType: 'markdown', emitUpdate: false })
       lastRichText.current = page.markdown
@@ -315,8 +343,21 @@ export function DocumentEditor({
   }
   useLayoutEffect(()=>{
     const input=sourceInput.current, item=editTarget.current
-    if (mode!=='source' || !item || !input) return
+    if (mode!=='source' || !input) return
+    if (!item) {
+      if (sourceSelection.current) {
+        const {start,end,direction,scroll}=sourceSelection.current
+        if(input.selectSource) input.selectSource(start,end,direction,scroll)
+        else {
+          input.focus({preventScroll:true})
+          input.setSelectionRange(start,end,direction)
+          input.scrollTop=scroll
+        }
+      }
+      return
+    }
     editTarget.current=null
+    if(input.selectSource) {input.selectSource(item.bodyStart,item.bodyEnd);return}
     input.focus()
     input.setSelectionRange(item.bodyStart,item.bodyEnd)
     input.scrollTop=Math.max(0,(item.line-1)*parseFloat(getComputedStyle(input).lineHeight)-input.clientHeight/3)
@@ -327,6 +368,8 @@ export function DocumentEditor({
     setSelectedHeading(heading.position)
     if (mode === 'source') {
       const input = sourceInput.current
+      if (!input) return
+      if(input.selectSource) {input.selectSource(heading.position,heading.position);return}
       input.focus()
       input.setSelectionRange(heading.position, heading.position)
       const lineHeight = parseFloat(getComputedStyle(input).lineHeight)
@@ -367,10 +410,13 @@ export function DocumentEditor({
           {mode==='read' && <Suspense fallback={<p role="status">正在排版…</p>}>
             <MarkdownReading markdown={page.markdown} edit={editFigure} onLink={onExternalLink}/>
           </Suspense>}
-          {mode === 'source' && <div className="source-editor">
-            {sourceInfo.sourceOnly && <p className="source-note"><CircleAlert size={15} />本文包含扩展语法，使用源码模式编辑可保留其原始格式。</p>}
-            <textarea ref={sourceInput} aria-label="Markdown 源码" value={editorSource(page.markdown)} maxLength={MAX_MARKDOWN_LENGTH}
-              spellCheck={false} placeholder="在这里编写 Markdown…" onChange={event => onChange({ markdown:editSource(page.markdown,event.target.value) })} />
+          {(mode === 'source' || largeDiskFile) && <div className="source-editor" hidden={mode!=='source'}>
+            {sourceInfo?.sourceOnly && <p className="source-note"><CircleAlert size={15} />本文包含扩展语法，使用源码模式编辑可保留其原始格式。</p>}
+            {largeDiskFile && !sourceInfo?.sourceOnly && <p className="source-note"><CodeXml size={15}/>大文档已打开源码。可切换到富文本编辑或阅读。</p>}
+            {largeDiskFile ? <Suspense fallback={<p role="status">正在打开源码…</p>}>
+              <LargeMarkdownSource ref={sourceInput} markdown={page.markdown} onChange={onChange} visible={mode==='source'}/>
+            </Suspense> : <textarea ref={sourceInput} aria-label="Markdown 源码" value={editorSource(page.markdown)} maxLength={MAX_MARKDOWN_LENGTH}
+              spellCheck={false} placeholder="在这里编写 Markdown…" onChange={event => onChange({ markdown:editSource(page.markdown,event.target.value) })} />}
           </div>}
         </div>
       </div>

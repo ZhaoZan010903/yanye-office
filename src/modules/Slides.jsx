@@ -1,3 +1,4 @@
+import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { ArrowDown, ArrowUp, Copy, FileDown, FileInput, ImagePlus, Move, PanelTop, Play, Plus, Printer, Shapes, Trash2, Type, X } from 'lucide-react'
@@ -81,6 +82,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   const [playing, setPlaying] = useState(false)
   const [printing, setPrinting] = useState(false)
   const [panel, setPanel] = useState('')
+  const [tab,setTab] = useState('开始')
   const [sourceId, setSourceId] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -109,7 +111,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
       try {
         await Promise.all([document.fonts.ready, ...[...document.querySelectorAll('.slides-print img')].map(img => img.decode())])
         await new Promise(resolve => requestAnimationFrame(resolve))
-        if (alive.current) await onPrintPdf(fileTitle + '.pdf')
+        if (alive.current) await onPrintPdf(fileTitle + '.pdf', { widthMm: 13.333333 * 25.4, heightMm: 7.5 * 25.4 })
       } finally {
         if (alive.current) setPrinting(false)
       }
@@ -196,7 +198,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
   useEffect(() => {
     function onKey(e) {
       if (e.isComposing) return
-      if (e.key === 'F5') { e.preventDefault(); show(); return }
+      if (e.key === 'F5') { e.preventDefault(); if (!playing && !e.shiftKey) setActiveId(deck.slides[0].id); show(); return }
       if (!playing) return
       const changes = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }
       let target = index
@@ -266,24 +268,40 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
         <button type="button" onClick={endShow}>退出放映 <kbd>Esc</kbd></button>
       </div>
     </div> : <>
-      <div className="slides-toolbar">
+      <Ribbon label="演示" tabs={['开始','插入','设计','切换','放映','文件']} active={tab}
+        onChange={next=>{setTab(next);setPanel(next==='切换'?'transition':'')}}/>
+      {tab!=='切换' && <div className="slides-toolbar ribbon-panel">
+        {tab==='开始' && <RibbonGroup label="幻灯片">
         <button type="button" onClick={() => insert(false)}><Plus size={16} />新建幻灯片</button>
+        <button type="button" onClick={()=>insert(true)}><Copy size={15}/>复制当前页</button>
+        <button type="button" disabled={deck.slides.length<=1} onClick={remove}><Trash2 size={15}/>删除当前页</button>
+        </RibbonGroup>}
+        {tab==='插入' && <RibbonGroup label="对象">
+        <button type="button" onClick={()=>imageInput.current.click()}><ImagePlus size={15}/>插入图片</button>
         <button type="button" onClick={insertBox}><Type size={15}/>插入文本框</button>
         <label>形状<select aria-label="形状类型" value={shapeKind} onChange={e=>setShapeKind(e.target.value)}>{Object.entries(shapeKinds).map(([type,label])=><option key={type} value={type}>{label}</option>)}</select></label>
         <button onClick={()=>insertShape()}><Shapes size={15}/>插入形状</button>
-        <label>版式<select aria-label="幻灯片版式" value={selected.layout} onChange={e => changeSlide(selected.id, { layout: e.target.value })}>
+        </RibbonGroup>}
+        {(tab==='开始' || tab==='设计') && <RibbonGroup label="版式"><label>版式<select aria-label="幻灯片版式" value={selected.layout} onChange={e => changeSlide(selected.id, { layout: e.target.value })}>
           {Object.entries(slideLayouts).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select></label>
-        <label>主题<select aria-label="演示主题" value={deck.theme} onChange={e => save({ ...deck, theme: e.target.value })}>
+        </RibbonGroup>}
+        {tab==='设计' && <RibbonGroup label="主题"><label>主题<select aria-label="演示主题" value={deck.theme} onChange={e => save({ ...deck, theme: e.target.value })}>
           {Object.entries(slideThemes).map(([id, t]) => <option key={id} value={id}>{t.name}</option>)}
         </select></label>
-        <button type="button" onClick={() => setPanel(panel === 'outline' ? '' : 'outline')} aria-expanded={panel === 'outline'}><PanelTop size={15} />文档大纲</button>
-        <button type="button" onClick={()=>setPanel(panel==='transition'?'':'transition')} aria-expanded={panel==='transition'}>切换</button>
+        </RibbonGroup>}
+        {tab==='插入' && <RibbonGroup label="大纲"><button type="button" onClick={() => setPanel(panel === 'outline' ? '' : 'outline')} aria-expanded={panel === 'outline'}><PanelTop size={15} />文档大纲</button>
+        </RibbonGroup>}
+        {tab==='文件' && <RibbonGroup label="导入与导出">
         <button type="button" onClick={() => setPanel(panel === 'import' ? '' : 'import')} aria-expanded={panel === 'import'}><FileInput size={15} />导入 PPTX</button>
         <button type="button" disabled={busy} onClick={exportFile}><FileDown size={15} />导出 PPTX</button>
         <button type="button" disabled={busy || !onPrintPdf} onClick={printDeck} title="将所有幻灯片导出为 PDF"><Printer size={15} />导出 PDF</button>
-        <button type="button" className="slides-play" onClick={show} title="从当前页放映（F5）"><Play size={15} />放映</button>
-      </div>
+        </RibbonGroup>}
+        {tab==='放映' && <RibbonGroup label="开始放映">
+        <button type="button" onClick={()=>{setActiveId(deck.slides[0].id);show()}} title="从头开始（F5）"><Play size={15}/>从头开始</button>
+        <button type="button" className="slides-play" onClick={show} title="从当前页放映（Shift+F5）"><Play size={15} />从当前页开始</button>
+        </RibbonGroup>}
+      </div>}
       {panel==='transition' && <div className="slides-panel" aria-label="当前页切换">
         <label>效果<select aria-label="切换效果" value={transition.effect} onChange={e=>setTransition({effect:e.target.value})}>{Object.entries(transitionNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
         <label>速度<select aria-label="切换速度" value={transition.speed} disabled={transition.effect!=='fade'} onChange={e=>setTransition({speed:e.target.value})}>{Object.entries(speedNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
@@ -293,7 +311,7 @@ export default function Slides({ value, onChange, onImport, onExport, onPrintPdf
           onBlur={e=>{ if(e.target.checkValidity() && Number.isFinite(e.target.valueAsNumber)) setTransition({afterMs:e.target.valueAsNumber*1000}); else e.target.value=transition.afterMs/1000 }}
           onKeyDown={e=>{if(e.key==='Enter') e.currentTarget.blur()}}/></label>}
         <button onClick={()=>save({...deck,slides:deck.slides.map(s=>({...s,transition}))})}>应用到全部幻灯片</button>
-        <IconAction icon={X} label="关闭切换设置" onClick={()=>setPanel('')}/>
+        <IconAction icon={X} label="关闭切换设置" onClick={()=>{setPanel('');setTab('开始')}}/>
       </div>}
       {currentShape && <ShapeProperties shape={currentShape} shapes={shapes} select={selectShape} edit={patch=>editShape(shapeId,patch)}
         reorder={direction=>changeSlide(selected.id,{shapes:moveSlide(shapes,shapes.indexOf(currentShape),direction)})}

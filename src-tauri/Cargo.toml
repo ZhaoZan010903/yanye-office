@@ -1,0 +1,37 @@
+[package]
+name = "yanye"
+version = "0.6.0"
+edition = "2021"
+license = "MIT"
+description = "砚页本地办公工作区"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dunce = "1"
+open = "5"
+percent-encoding = "2"
+rfd = "0.15"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
+sha2 = "0.10"
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tempfile = "3"
+trash = "5"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]

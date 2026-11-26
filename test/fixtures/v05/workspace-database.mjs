@@ -3,8 +3,8 @@ import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { MAX_WORKSPACE_BYTES, assertWorkspace, initialWorkspace } from '../shared/workspace.mjs'
-import { applyPlainTextDelta, applyWorkspaceDelta } from '../shared/workspace-delta.mjs'
+import { MAX_WORKSPACE_BYTES, assertWorkspace, initialWorkspace } from '../../../shared/workspace.mjs'
+import { applyPlainTextDelta, applyWorkspaceDelta } from '../../../shared/workspace-delta.mjs'
 
 const digest = input => createHash('sha256').update(input).digest('hex')
 const compactAfter = 128

@@ -1,52 +1,36 @@
-import { packager } from '@electron/packager'
-import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { execFile, spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { copyFile, mkdir, readFile, readdir } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
+// Tauri builds the frontend, embeds the assets in the executable, then creates
+// the installer. Collect both Windows distributions under versioned names.
 const root = fileURLToPath(new URL('../', import.meta.url))
-const release = resolve(root, 'release')
-const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
-const electronVersion = pkg.devDependencies.electron
-const electronZipDir = process.env.YANYE_ELECTRON_ZIP_DIR
-if (electronZipDir) {
-  const name = 'electron-v' + electronVersion + '-win32-x64.zip'
-  const checksums = JSON.parse(await readFile(join(root, 'node_modules', 'electron', 'checksums.json'), 'utf8'))
-  const sum = createHash('sha256')
-  for await (const chunk of createReadStream(join(electronZipDir, name))) sum.update(chunk)
-  if (sum.digest('hex') !== checksums[name]) throw new Error('Electron ZIP 校验失败，请检查文件与版本。')
-}
-await mkdir(release, { recursive: true })
-const staging = await mkdtemp(join(release, 'package-input-'))
-
-try {
-  for (const directory of ['dist', 'electron', 'shared', 'assets']) {
-    await cp(join(root, directory), join(staging, directory), { recursive: true })
-  }
-  await cp(join(root, 'LICENSE'), join(staging, 'LICENSE'))
-  const { name, version, author, license, productName, description, type, main } = pkg
-  await writeFile(join(staging, 'package.json'), JSON.stringify({ name, version, author, license, productName, description, type, main }))
-  const paths = await packager({
-    dir: staging,
-    out: release,
-    name: 'YanYe',
-    executableName: 'YanYe',
-    platform: 'win32',
-    arch: 'x64',
-    appVersion: version,
-    electronVersion,
-    electronZipDir,
-    appBundleId: 'com.yanye.desktop',
-    icon: join(root, 'assets', 'yanye.ico'),
-    asar: true,
-    prune: false,
-    overwrite: true,
-    win32metadata: { ProductName: productName, FileDescription: description, InternalName: 'YanYe' },
-  })
-  console.log(paths.map(path => join(path, 'YanYe.exe')).join('\n'))
-} finally {
-  if (dirname(staging) === release && basename(staging).startsWith('package-input-')) {
-    await rm(staging, { recursive: true, force: true, maxRetries: 4 })
-  }
-}
+const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const output = join(root, 'release')
+const built = join(process.env.CARGO_TARGET_DIR || join(root, 'src-tauri', 'target'), 'release')
+const binaries = join(built, 'bundle', 'nsis')
+const files = (await readdir(built)).filter(file => /\.dll$/i.test(file))
+// With the GNU LLVM toolchain the WebView2 loader is a DLL. Include any
+// target runtime libraries next to the executable in both distributions.
+const resources = Object.fromEntries(files.map(file => [join(built, file), file]))
+const cli = join(dirname(createRequire(import.meta.url).resolve('@tauri-apps/cli/package.json')), 'tauri.js')
+const bundled = spawnSync(process.execPath, [cli, 'bundle', '--bundles', 'nsis', '--config',
+  JSON.stringify({ bundle: { resources } })], { cwd: root, stdio: 'inherit' })
+if (bundled.error) throw bundled.error
+if (bundled.status !== 0) throw new Error('Windows 安装包构建失败。')
+const installer = (await readdir(binaries)).find(name => name.includes(version + '_') && /x64.*setup\.exe$/i.test(name))
+if (!installer) throw new Error('未找到本次构建生成的 Windows x64 安装程序。')
+const name = 'YanYe-' + version + '-windows-x64'
+const portable = join(output, name)
+await mkdir(portable, { recursive: true })
+for (const file of files) await copyFile(join(built, file), join(portable, file))
+await copyFile(join(built, 'yanye.exe'), join(portable, 'YanYe.exe'))
+await copyFile(join(root, 'LICENSE'), join(portable, 'LICENSE'))
+await copyFile(join(root, 'dist', 'third-party-licenses.md'), join(portable, 'third-party-licenses.md'))
+await promisify(execFile)('tar.exe', ['-a', '-cf', join(output, name + '.zip'), '-C', portable,
+  'YanYe.exe', 'LICENSE', 'third-party-licenses.md', ...files])
+await copyFile(join(binaries, installer), join(output, name + '-setup.exe'))
+console.log(join(output, name + '.zip'), join(output, name + '-setup.exe'))

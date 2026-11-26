@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { WorkspaceStore, writeAtomically } from '../electron/store.mjs'
+import { WorkspaceStore, writeAtomically } from './fixtures/v05/store.mjs'
 import {
   addPage, assertWorkspace, makePage, MAX_WORKSPACE_BYTES, movePage, officeKinds,
   restorePage, trashPage, updatePage, workspaceBytes,

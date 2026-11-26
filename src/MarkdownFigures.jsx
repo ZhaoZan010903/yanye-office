@@ -38,7 +38,7 @@ export function Figure({ item }) {
   return <Box className="md-figure-content">
     {!result && <span role="status">正在渲染…</span>}
     {result?.error && <span role="alert">{result.error}</span>}
-    {result?.image && <img src={result.image} alt={'第 '+item.line+' 行的 Mermaid 图'}/>}
+    {result?.image && <img src={result.image} alt={item.line ? '第 '+item.line+' 行的 Mermaid 图' : 'Mermaid 图'}/>}
     <Box ref={host} className="md-math" hidden={item.kind==='mermaid' || Boolean(result?.error)}/>
   </Box>
 }

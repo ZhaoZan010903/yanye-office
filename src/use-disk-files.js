@@ -50,9 +50,7 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     }
   }
 
-  function openFile(load) {
-    return run(async () => {
-      const file = await load()
+  async function openDocument(file) {
       if (!file) return false
       const type = fileTypes[file.extension]
       if (!type) throw new Error('此格式尚未提供编辑器。')
@@ -81,6 +79,20 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
       }
       setEpoch(n => n + 1)
       return true
+  }
+
+  function openFile(load) {
+    return run(async () => openDocument(await load()))
+  }
+
+  function openLaunchFiles() {
+    return run(async () => {
+      for (;;) {
+        const file = await window.yanye.nextLaunchFile()
+        if (!file) break
+        try { await openDocument(file) }
+        catch (error) { notify(String(error?.message || error)) }
+      }
     })
   }
 
@@ -186,5 +198,5 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     })
   }
 
-  return { busy, epoch, openFile, createFile, saveFile, encodingRequest }
+  return { busy, epoch, openFile, openLaunchFiles, createFile, saveFile, encodingRequest }
 }

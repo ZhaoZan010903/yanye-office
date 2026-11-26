@@ -120,6 +120,15 @@ export function App() {
     if (latest.current?.pages.find(p => p.id === id)?.disk) setTabs(ids => ids.includes(id) ? ids : [...ids,id])
   }
   const files = useDiskFiles({ latest, change, reveal, notify, prompt: setModal })
+  const [launchEpoch, setLaunchEpoch] = useState(0)
+  const lastLaunch = useRef(-1)
+  const ready = Boolean(workspace)
+  useEffect(() => desktop?.onLaunchFiles?.(() => setLaunchEpoch(n => n + 1)), [])
+  useEffect(() => {
+    if (!ready || files.busy || !desktop?.nextLaunchFile || lastLaunch.current === launchEpoch) return
+    lastLaunch.current = launchEpoch
+    void files.openLaunchFiles().catch(handleFileError)
+  }, [ready, files.busy, launchEpoch])
   function home() { setScreen('files'); setModal(null); setFileError('') }
   function handleFileError(error) { setFileError(errorText(error)) }
 
@@ -306,6 +315,7 @@ export function App() {
         contextOpen={contextOpen} onContextToggle={() => setContextOpen(value => !value)}
         onChange={fields => edit(page.id, fields)} onOpenPage={open} onCreateChild={() => create(page.id)}
         onFavorite={() => favorite(page)} onExport={() => exportMarkdown(page.id)} onMenu={() => pageMenu(page.id)}
+        onOpenFileLink={page.disk && (href => files.openFile(() => desktop.library.markdownLink(page.disk.id, href)).catch(error => notify(errorText(error))))}
         onExternalLink={href => desktop.openLink(href).catch(error => notify(errorText(error)))} /></Suspense>
         : <EmptyWorkspace onCreate={() => actions.create()} />}
     </main>

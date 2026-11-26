@@ -1,5 +1,6 @@
+import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, FileStack, Highlighter, MessageSquarePlus, RotateCcw, RotateCw, Trash2, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Highlighter, MessageSquarePlus, RotateCcw, RotateCw, Trash2, Undo2 } from 'lucide-react'
 import { appendPdfBytes, extractPdfBytes, initialPdfPages, movePdfPage, parsePdfPageRange } from './pdf-edits.js'
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -90,7 +91,9 @@ export default function PdfReader({ disk, value, onChange }) {
   const [result,setResult] = useState({pages:[], busy:false}), [searchError,setSearchError] = useState('')
   const scroller = useRef(null), searchBox = useRef(null)
   const viewportRef = useRef(null)
-  const [toolsOpen,setToolsOpen] = useState(false), [note,setNote] = useState(''), [addingNote,setAddingNote] = useState(false)
+  const [tab,setTab] = useState('开始'), [showThumbs,setShowThumbs] = useState(true)
+  const toolsOpen = tab==='页面' || tab==='注释'
+  const [note,setNote] = useState(''), [addingNote,setAddingNote] = useState(false)
   const [existingNotes,setExistingNotes] = useState([]), [undo,setUndo] = useState([])
   const [highlightColor,setHighlightColor] = useState('FFDB55'), [hasSelection,setHasSelection] = useState(false)
   const [range,setRange] = useState(''), [exportState,setExportState] = useState({}), exporting=useRef(false)
@@ -178,10 +181,10 @@ export default function PdfReader({ disk, value, onChange }) {
 
   useEffect(() => {
     const focusSearch = event => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && searchBox.current) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault()
-        searchBox.current.focus()
-        searchBox.current.select()
+        setTab('开始');setAddingNote(false)
+        requestAnimationFrame(()=>{searchBox.current?.focus();searchBox.current?.select()})
       }
     }
     window.addEventListener('keydown',focusSearch)
@@ -246,54 +249,73 @@ export default function PdfReader({ disk, value, onChange }) {
     if (Number.isInteger(value) && value >= 1 && value <= pages.length) setNumber(value)
     else setPageEntry(String(number))
   }
+  function fitPage(whole) {
+    const view=scroller.current, paper=view?.querySelector('.pdf-paper')
+    if (!view || !paper || !paper.offsetWidth || !paper.offsetHeight) return
+    const width=(view.clientWidth-32)/paper.offsetWidth
+    const height=(view.clientHeight-32)/paper.offsetHeight
+    setZoom(Math.min(4,Math.max(.1,Math.floor(zoom*(whole?Math.min(width,height):width)*100)/100)))
+  }
   function nextMatch() {
     setNumber(result.pages.find(n => n>number) ?? result.pages[0])
   }
   return <section className="pdf-reader" aria-label="PDF 正文阅读器">
-    <div className="reader-tools">
+    <Ribbon label="PDF" tabs={['开始','注释','页面','视图']} active={tab} onChange={next=>{setTab(next);setAddingNote(false)}}/>
+    {(tab==='开始' || tab==='视图') && <div className="reader-tools ribbon-panel">
+      <RibbonGroup label="翻页">
       <button disabled={number===1} onClick={() => setNumber(n=>n-1)}>上一页</button>
       <label>页 <input aria-label="跳至 PDF 页码" type="number" min="1" max={pages.length} value={pageEntry}
         onChange={e=>setPageEntry(e.target.value)} onBlur={commitPage} onKeyDown={e=>{ if(e.key==='Enter') commitPage() }}/></label>
       <span>共 {pages.length} 页</span><button disabled={number===pages.length} onClick={()=>setNumber(n=>n+1)}>下一页</button>
+      </RibbonGroup><RibbonGroup label="显示比例">
       <label>缩放 <select aria-label="PDF 缩放" value={zoom} onChange={e=>setZoom(Number(e.target.value))}>
-        {[0.5,0.75,1,1.25,1.5,2].map(n=><option key={n} value={n}>{n*100}%</option>)}</select></label>
-      <form onSubmit={e=>{e.preventDefault(); const key=query.trim(); if (key===submitted && result.pages.length) nextMatch(); else setSubmitted(key)}}>
+        {[...new Set([0.5,0.75,1,1.25,1.5,2,zoom])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{Math.round(n*100)}%</option>)}</select></label>
+      {tab==='视图' && <>
+        <button onClick={()=>fitPage(false)}>适合页宽</button><button onClick={()=>fitPage(true)}>适合整页</button>
+        <button aria-pressed={showThumbs} onClick={()=>setShowThumbs(!showThumbs)}>页面缩略图</button>
+      </>}
+      </RibbonGroup>
+      {tab==='开始' && <RibbonGroup label="文字查找"><form onSubmit={e=>{e.preventDefault(); const key=query.trim(); if (key===submitted && result.pages.length) nextMatch(); else setSubmitted(key)}}>
         <input ref={searchBox} aria-label="PDF 搜索文字" placeholder="搜索 PDF 文字" value={query} onChange={e=>{setQuery(e.target.value); if (!e.target.value.trim()) setSubmitted('')}}/>
         <button disabled={!query.trim()}>查找</button>
       </form>
       {submitted && <span role="status">{result.busy?'正在检索…':result.pages.length?'匹配 '+result.pages.length+' 页':'未找到可检索的匹配文字'}</span>}
       {result.busy && <button onClick={()=>setSubmitted('')}>取消查找</button>}
       {result.pages.length>1 && <button onClick={nextMatch}>下一匹配页</button>}{searchError && <span role="alert">{searchError}</span>}
-      <button className="pdf-organize" aria-expanded={toolsOpen} onClick={()=>{setToolsOpen(!toolsOpen);setAddingNote(false)}}><FileStack size={15}/>整理与批注</button>
-    </div>
+      </RibbonGroup>}
+    </div>}
     {toolsOpen && <section className="pdf-edit-panel" aria-label="PDF 页面编辑">
-      <div className="reader-tools">
+      <div className="reader-tools ribbon-panel">
+        {tab==='页面' && <RibbonGroup label="页面顺序与方向">
         <button onClick={()=>rotate(-90)}><RotateCcw size={14}/>左旋</button>
         <button onClick={()=>rotate(90)}><RotateCw size={14}/>右旋</button>
         <button disabled={number<=1} onClick={()=>apply(movePdfPage(pages,number-1,number-2),number-1)}><ArrowUp size={14}/>前移</button>
         <button disabled={number>=pages.length} onClick={()=>apply(movePdfPage(pages,number-1,number),number+1)}><ArrowDown size={14}/>后移</button>
         <button disabled={pages.length<2} onClick={()=>apply(pages.filter((_,i)=>i!==number-1),Math.min(number,pages.length-1))}><Trash2 size={14}/>移除本页</button>
-        <button disabled={!undo.length} onClick={()=>{const last=undo.at(-1);if(onChange(last.value)!==false){setNumber(last.number);setUndo(undo.slice(0,-1))}}}><Undo2 size={14}/>撤销整理</button>
+        </RibbonGroup>}
+        {tab==='注释' && <RibbonGroup label="批注工具">
         <button aria-pressed={addingNote} onClick={()=>setAddingNote(!addingNote)}><MessageSquarePlus size={14}/>添加便签</button>
         <select aria-label="高亮颜色" value={highlightColor} onChange={e=>setHighlightColor(e.target.value)}><option value="FFDB55">黄色</option><option value="87DDA0">绿色</option><option value="83C9EF">蓝色</option></select>
         <button onMouseDown={e=>e.preventDefault()} disabled={!hasSelection} onClick={highlightSelection} title="先在正文中选中文字"><Highlighter size={14}/>高亮选区</button>
         {addingNote && <label>便签内容 <input autoFocus aria-label="PDF 便签内容" value={note} maxLength={2000} onChange={e=>setNote(e.target.value)} placeholder="输入后点击页面放置"/></label>}
+        </RibbonGroup>}
+        <RibbonGroup label="历史"><button disabled={!undo.length} onClick={()=>{const last=undo.at(-1);if(onChange(last.value)!==false){setNumber(last.number);setUndo(undo.slice(0,-1))}}}><Undo2 size={14}/>撤销整理</button></RibbonGroup>
       </div>
-      <div className="reader-tools pdf-export-tools">
+      {tab==='页面' && <div className="reader-tools pdf-export-tools">
         <label>页码范围 <input aria-label="提取页码范围" placeholder="例如 1,3-5" value={range} onChange={e=>setRange(e.target.value)}/></label>
         <button disabled={!range.trim() || exportState.busy} onClick={()=>exportPages('extract')}>提取为 PDF</button>
         <button disabled={exportState.busy} onClick={()=>exportPages('append')}>追加另一份 PDF 并导出</button>
         {exportState.busy && <span role="status">正在准备副本…</span>}{exportState.message && <span role="status">{exportState.message}</span>}
         {exportState.error && <span role="alert">{exportState.error}</span>}
-      </div>
-      {(existingNotes.length>0 || current?.notes?.length>0) && <ul className="pdf-notes" aria-label="本页便签">{existingNotes.map(n=><li key={n.id}>{n.text}</li>)}{current?.notes?.map(n=><li key={n.id}>{n.text}<button aria-label={'删除便签 '+n.text} onClick={()=>apply(pages.map((p,i)=>i===number-1 ? {...p,notes:p.notes.filter(v=>v.id!==n.id)} : p))}>移除</button></li>)}</ul>}
+      </div>}
+      {tab==='注释' && (existingNotes.length>0 || current?.notes?.length>0) && <ul className="pdf-notes" aria-label="本页便签">{existingNotes.map(n=><li key={n.id}>{n.text}</li>)}{current?.notes?.map(n=><li key={n.id}>{n.text}<button aria-label={'删除便签 '+n.text} onClick={()=>apply(pages.map((p,i)=>i===number-1 ? {...p,notes:p.notes.filter(v=>v.id!==n.id)} : p))}>移除</button></li>)}</ul>}
       {value?.pdfPages && <small>更改已加入本机草稿。按 Ctrl+S 将页面和批注保存为独立 PDF。签名需要在输出文件中重新核验。</small>}
     </section>}
-    <div className="pdf-body"><nav className="pdf-thumbs" aria-label="PDF 页面缩略图">
+    <div className="pdf-body">{showThumbs && <nav className="pdf-thumbs" aria-label="PDF 页面缩略图">
       {Array.from({length:Math.min(5,pages.length)},(_,i)=>start+i).map(n=><button key={n} aria-label={'转到第 '+n+' 页'}
         aria-current={number===n?'page':undefined} onClick={()=>setNumber(n)}>
         <PageImage doc={doc} number={pages[n-1].source} rotation={pages[n-1].rotation} small/><span>{n}</span>
       </button>)}
-    </nav><div className={'pdf-scroll'+(addingNote?' pdf-placing-note':'')} ref={scroller} onClick={placeNote}>{current && <PageImage doc={doc} number={current.source} rotation={current.rotation} notes={current.notes} highlights={current.highlights} showNotes={toolsOpen} viewportRef={viewportRef} zoom={zoom}/>}</div></div>
+    </nav>}<div className={'pdf-scroll'+(addingNote?' pdf-placing-note':'')} ref={scroller} onClick={placeNote}>{current && <PageImage doc={doc} number={current.source} rotation={current.rotation} notes={current.notes} highlights={current.highlights} showNotes viewportRef={viewportRef} zoom={zoom}/>}</div></div>
   </section>
 }

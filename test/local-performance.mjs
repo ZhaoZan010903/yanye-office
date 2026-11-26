@@ -5,7 +5,7 @@ import { arch, cpus, release, tmpdir, totalmem } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { _electron } from 'playwright'
 import { addPage, initialWorkspace, makePage } from '../shared/workspace.mjs'
-import { WorkspaceDatabase } from '../electron/workspace-database.mjs'
+import { WorkspaceDatabase } from './fixtures/v05/workspace-database.mjs'
 import { createHash } from 'node:crypto'
 
 // node test/local-performance.mjs path/to/YanYe.exe [output.json] [--extended | --input | --tabs]

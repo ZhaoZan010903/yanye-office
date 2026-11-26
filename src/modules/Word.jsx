@@ -1,3 +1,4 @@
+import Ribbon, { RibbonGroup } from '../office/Ribbon'
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
@@ -179,7 +180,7 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     try {
       flushSync(()=>setPrint(editor.getHTML()))
       await Promise.all([document.fonts.ready,...[...document.querySelectorAll('.word-print-root img')].map(i=>i.decode())])
-      if (alive.current) await onPrintPdf((title || 'Word 文档')+'.pdf')
+      if (alive.current) await onPrintPdf((title || 'Word 文档')+'.pdf', { widthMm: width, heightMm: height })
     } catch(error){if(alive.current)setMessage(error.message)}
     finally {if(alive.current){setPrint(null);setPrinting(false)}}
   }
@@ -203,14 +204,14 @@ export default function Word({value, onChange, onPrintPdf, title}) {
   }
   const customMargin=![12.7,25.4,38.1].some(n=>[layout.top,layout.right,layout.bottom,layout.left].every(v=>Math.abs(v-n)<0.06))
   return <section className="word-editor" aria-label="文字处理">
-    <div className="word-tabs">{['开始','插入','布局','审阅'].map(t=><button key={t} type="button" aria-pressed={tab===t} onClick={()=>setTab(t)}>{t}</button>)}
-      <span className="word-spacer"/><Action label="查找替换" icon={Search} onClick={()=>{setSearching(!searching);requestAnimationFrame(()=>searchRef.current?.focus())}}/>
+    <Ribbon label="文字" active={tab} onChange={setTab} tabs={['开始','插入','布局','审阅','视图']}>
+      <Action label="查找替换" icon={Search} onClick={()=>{setSearching(!searching);requestAnimationFrame(()=>searchRef.current?.focus())}}/>
       <Action label="导出 PDF" icon={FileDown} onClick={printPdf} disabled={printing || !onPrintPdf}/>
-    </div>
-    {tab!=='审阅' && <div className="word-tools" role="toolbar" aria-label={tab+'工具'}>
-      {tab==='开始' && <>
+    </Ribbon>
+    {tab!=='审阅' && <div className="word-tools ribbon-panel" role="toolbar" aria-label={tab+'工具'}>
+      {tab==='开始' && <><RibbonGroup label="编辑">
         <Action compact icon={Undo2} label="撤销" onClick={()=>run('undo')} disabled={!format.undo}/><Action compact icon={Redo2} label="重做" onClick={()=>run('redo')} disabled={!format.redo}/>
-        <span className="word-divider"/>
+        </RibbonGroup><RibbonGroup label="样式与字体">
         <select aria-label="段落样式" value={format.heading} onChange={e=>Number(e.target.value)?run('setHeading',{level:Number(e.target.value)}):run('setParagraph')}>
           <option value="0">正文</option>{[1,2,3,4,5,6].map(v=><option key={v} value={v}>标题 {v}</option>)}</select>
         <FontPicker label="字体" value={activeFont} onChange={font=>applyStyle({font})}/>
@@ -223,22 +224,24 @@ export default function Word({value, onChange, onPrintPdf, title}) {
           <option value="">无荧光标记</option>{Object.entries(highlights).map(([key,[label]])=><option value={key} key={key}>{label}荧光</option>)}</select>
         {[[Superscript,'上标','superscript'],[Subscript,'下标','subscript']].map(([icon,label,key])=><Action compact key={key} icon={icon} label={label}
           pressed={format.run.script===key} onClick={()=>applyStyle({script:format.run.script===key ? null : key})}/>)}
-        <span className="word-divider"/>
+        </RibbonGroup><RibbonGroup label="段落">
         {aligns.map(([a,label,icon])=><Action compact key={a} label={label} icon={icon} pressed={format.align===a} onClick={()=>paragraphPatch({align:a})}/>)}
         <Action compact label="项目符号" icon={List} pressed={format.bullet} onClick={()=>run('toggleBulletList')}/><Action compact label="编号列表" icon={ListOrdered} pressed={format.numbered} onClick={()=>run('toggleOrderedList')}/>
         <label>行距 <select aria-label="行距" value={format.spacing} onChange={e=>paragraphPatch({lineSpacing:Number(e.target.value)})}>
           {[...new Set([1,1.25,1.5,2,format.spacing])].sort((a,b)=>a-b).map(n=><option key={n}>{n}</option>)}</select></label>
-      </>}
-      {tab==='插入' && <>
+      </RibbonGroup></>}
+      {tab==='插入' && <><RibbonGroup label="页眉和页脚">
         <Action label="页眉页脚" pressed={bandsOpen} onClick={()=>setBandsOpen(!bandsOpen)}/>
+        </RibbonGroup><RibbonGroup label="表格">
         <label>行 <input aria-label="表格行数" type="number" min="1" max="30" value={rows} onChange={e=>setRows(e.target.value)}/></label>
         <label>列 <input aria-label="表格列数" type="number" min="1" max="12" value={columns} onChange={e=>setColumns(e.target.value)}/></label>
         <Action label="插入表格" icon={Table2} disabled={!Number.isInteger(+rows)||+rows<1||+rows>30||!Number.isInteger(+columns)||+columns<1||+columns>12} onClick={()=>run('insertTable',{rows:+rows,cols:+columns,withHeaderRow:true})}/>
+        {format.table && <><span className="word-divider"/>{[['加行','addRowAfter'],['加列','addColumnAfter'],['删除行','deleteRow'],['删除列','deleteColumn'],['合并单元格','mergeCells'],['拆分单元格','splitCell'],['删除表格','deleteTable']].map(([label,cmd])=><Action key={cmd} label={label} disabled={!editor.can()[cmd]()} onClick={()=>run(cmd)}/>)}</>}
+        </RibbonGroup><RibbonGroup label="插图和分页">
         <Action label="插入图片" icon={ImagePlus} onClick={()=>fileRef.current.click()}/>
         <Action label="插入分页符" onClick={()=>run('insertContent',{type:'pageBreak'})}/>
-        {format.table && <><span className="word-divider"/>{[['加行','addRowAfter'],['加列','addColumnAfter'],['删除行','deleteRow'],['删除列','deleteColumn'],['合并单元格','mergeCells'],['拆分单元格','splitCell'],['删除表格','deleteTable']].map(([label,cmd])=><Action key={cmd} label={label} disabled={!editor.can()[cmd]()} onClick={()=>run(cmd)}/>)}</>}
-      </>}
-      {tab==='布局' && <>
+      </RibbonGroup></>}
+      {tab==='布局' && <><RibbonGroup label="段落间距">
         <label>首行 <select aria-label="首行缩进" value={format.paragraph.firstLineChars ?? (format.paragraph.firstLinePt ? 'pt' : 0)}
           onChange={e=>paragraphPatch({firstLineChars:Number(e.target.value),firstLinePt:null})}>
           {[...new Set([0,1,2,3,...(Number.isFinite(format.paragraph.firstLineChars)?[format.paragraph.firstLineChars]:[])])].map(n=><option key={n} value={n}>{n} 字符</option>)}
@@ -248,12 +251,19 @@ export default function Word({value, onChange, onPrintPdf, title}) {
           return <label key={key}>{label}<select aria-label={label+'间距'} value={current ?? ''} onChange={e=>paragraphPatch({[key]:e.target.value==='' ? null : Number(e.target.value)})}>
             <option value="">样式默认</option>{[...new Set([0,3,6,9,12,18,24,...(Number.isFinite(current)?[current]:[])])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n} pt</option>)}</select></label>
         })}
+        </RibbonGroup><RibbonGroup label="页面设置">
         <label>纸张 <select aria-label="纸张大小" value={layout.paper} onChange={e=>changeLayout({paper:e.target.value})}>
           {Object.keys(papers).map(p=><option key={p}>{p}</option>)}{layout.paper==='custom'&&<option value="custom">文档自定义</option>}</select></label>
         <label>方向 <select aria-label="纸张方向" value={layout.landscape?'landscape':'portrait'} onChange={e=>changeLayout({landscape:e.target.value==='landscape'})}><option value="portrait">纵向</option><option value="landscape">横向</option></select></label>
         <label>页边距 <select aria-label="页边距" value={customMargin?'custom':[12.7,25.4,38.1].find(n=>Math.abs(layout.top-n)<0.06)} onChange={e=>{const n=Number(e.target.value);changeLayout({top:n,bottom:n,left:n,right:n})}}>
           <option value="12.7">窄 · 1.27 厘米</option><option value="25.4">普通 · 2.54 厘米</option><option value="38.1">宽 · 3.81 厘米</option>{customMargin && <option value="custom">文档自定义</option>}</select></label>
-      </>}
+      </RibbonGroup></>}
+      {tab==='视图' && <><RibbonGroup label="显示比例">
+        {[75,100,125,150].map(n=><Action key={n} label={n+'%'} pressed={zoom===n} onClick={()=>setZoom(n)}/>)}
+      </RibbonGroup><RibbonGroup label="导航">
+        <Action label="跳至文首" onClick={()=>editor.commands.focus('start')}/>
+        <Action label="跳至文末" onClick={()=>editor.commands.focus('end')}/>
+      </RibbonGroup></>}
     </div>}
     {bandsOpen && tab==='插入' && <WordBands layout={layout} onChange={changeLayout}/>}
     {tab==='审阅' && <WordComments editor={editor}/>}

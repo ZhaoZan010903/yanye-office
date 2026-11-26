@@ -1,0 +1,22 @@
+.office-ribbon { display:flex; align-items:stretch; justify-content:space-between; flex:none; gap:8px; min-height:36px; background:#fff; border-block:1px solid #e9e7e4; padding:0 12px; }
+.word-editor { --ribbon-accent:#305da4; } .sheet-module { --ribbon-accent:#287354; }
+.slides-editor { --ribbon-accent:#a84f32; } .pdf-reader { --ribbon-accent:#aa4447; }
+.ribbon-tabs,.ribbon-quick { display:flex; gap:4px; align-items:center; }
+.ribbon-tabs { overflow-x:auto; scrollbar-width:thin; min-width:0; }
+.office-ribbon .ribbon-tabs button,.office-ribbon .ribbon-quick button { flex:none; background:transparent; border:0; border-radius:4px; padding:4px 10px; color:#37352f; font:500 13px/1.6 "Segoe UI",system-ui,sans-serif; }
+.ribbon-tabs button { position:relative; }
+.ribbon-tabs button[aria-selected=true] { color:var(--ribbon-accent); font-weight:600; }
+.ribbon-tabs button[aria-selected=true]::after { content:""; position:absolute; height:2px; background:currentColor; inset:auto 10px 0; }
+.office-ribbon button:not(:disabled):is(:hover,:focus-visible), .ribbon-group-tools button:not(:disabled):hover { background:#efedea; }
+.office-ribbon button:focus-visible { outline:1px solid var(--ribbon-accent); outline-offset:-1px; }
+.office-ribbon button,.ribbon-group-tools button { transition:background-color 150ms, color 150ms; }
+.ribbon-quick button { display:inline-flex; align-items:center; gap:4px; }
+.ribbon-panel { display:flex; align-items:stretch; flex-wrap:wrap; gap:0; padding:4px 12px; flex:none; background:white; border-bottom:1px solid #e9e7e4; font-size:13px; }
+.ribbon-group { display:flex; flex-direction:column; align-items:stretch; justify-content:space-between; gap:4px; min-width:0; padding:0 10px; border-inline-end:1px solid #e9e7e4; }
+.ribbon-group:first-child { padding-inline-start:0; } .ribbon-group:last-child { border-inline-end:0; }
+.ribbon-group > small { display:block; text-align:center; font-size:11px; font-weight:400; color:#716f68; }
+.ribbon-group-tools { flex:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+.ribbon-group-tools svg { color:var(--ribbon-accent); }
+.office-page[data-ribbon-hidden=true] :is(.office-ribbon,.ribbon-panel,.sheet-functions) { display:none; }
+@media (prefers-reduced-motion:reduce) { .office-ribbon button,.ribbon-group-tools button { transition:none; } }
+@media (max-width:760px) { .office-ribbon,.ribbon-panel { padding-inline:6px; } .office-ribbon { flex-wrap:wrap; } .ribbon-group { padding:3px 6px; } }

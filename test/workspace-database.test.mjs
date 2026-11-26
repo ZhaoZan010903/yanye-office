@@ -6,8 +6,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { WorkspaceDatabase } from '../electron/workspace-database.mjs'
-import { settleWorkspaceForClose } from '../electron/store.mjs'
+import { WorkspaceDatabase } from './fixtures/v05/workspace-database.mjs'
+import { settleWorkspaceForClose } from './fixtures/v05/store.mjs'
 import { addPage, makePage, updatePage, initialWorkspace, trashPage, MAX_WORKSPACE_BYTES, workspaceBytes } from '../shared/workspace.mjs'
 import { applyWorkspaceDelta, workspaceDelta } from '../shared/workspace-delta.mjs'
 
@@ -96,7 +96,7 @@ test('an interrupted first migration can restart without duplicating pages or ch
   const original = initialWorkspace()
   const json = JSON.stringify(original)
   await writeFile(path, json)
-  const moduleUrl = new URL('../electron/workspace-database.mjs', import.meta.url).href
+  const moduleUrl = new URL('./fixtures/v05/workspace-database.mjs', import.meta.url).href
   await interruptTransaction(`
     import { WorkspaceDatabase } from ${JSON.stringify(moduleUrl)}
     const insert = WorkspaceDatabase.prototype.addPage
@@ -114,14 +114,14 @@ test('an interrupted first migration can restart without duplicating pages or ch
   recovered.close()
 })
 
-test('text splices retain individual surrogate units and embedded NUL through SQLite', async t => {
+test('emoji replacements keep complete UTF-16 pairs across JSON IPC and embedded NUL through SQLite', async t => {
   const dir = await profile(t)
   const db = new WorkspaceDatabase(dir)
   const one = edit(db.workspace, 'desk', { markdown: '甲\0😀\0乙' })
   db.commit([workspaceDelta(db.workspace, one)])
   const two = edit(one, 'desk', { markdown: '甲\0😁\0乙' })
   const delta = workspaceDelta(one, two)
-  assert.equal(delta.changes[0].text.inserted.length, 1)
+  assert.equal(delta.changes[0].text.inserted, '😁')
   db.commit([delta])
   db.close()
   const reopened = new WorkspaceDatabase(dir)
@@ -255,7 +255,7 @@ test('cached TXT quotas match actual serialized UTF-8 across surrogate boundarie
 
 test('reopening after forced writer death recovers acknowledged WAL commits and rolls back in-flight edits', { timeout: 20000 }, async t => {
   const dir = await profile(t)
-  const moduleUrl = new URL('../electron/workspace-database.mjs', import.meta.url).href
+  const moduleUrl = new URL('./fixtures/v05/workspace-database.mjs', import.meta.url).href
   const deltaUrl = new URL('../shared/workspace-delta.mjs', import.meta.url).href
   const script = `
     import { WorkspaceDatabase } from ${JSON.stringify(moduleUrl)}

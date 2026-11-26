@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { FileLibrary } from '../electron/library.mjs'
+import { FileLibrary } from './fixtures/v05/library.mjs'
 
 async function setup(t) {
   const dir = await mkdtemp(join(tmpdir(), 'yanye-library-'))

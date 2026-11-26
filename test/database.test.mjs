@@ -3,7 +3,7 @@ import test from 'node:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorkspaceStore } from '../electron/store.mjs'
+import { WorkspaceStore } from './fixtures/v05/store.mjs'
 import { addPage, makePage, updatePage } from '../shared/workspace.mjs'
 import { emptyBase, fieldValue, fromMatrix, makeRecord, MAX_CELL_LENGTH, MAX_FIELDS, MAX_RECORDS,
   removeField, removeRecord, selectRecords, toMatrix, validateBase, views } from '../src/modules/database.js'

@@ -27,6 +27,8 @@
 .sheet-scroll thead th:first-child, .sheet-scroll tbody th { position: sticky; left: 0; z-index: 1; }
 .sheet-scroll thead th:first-child { z-index: 3; }
 .sheet-scroll th.sheet-head-active { background: #efedea; color: #37352f; }
+.sheet-formula[hidden] { display:none; }
+.sheet-module[data-gridlines=false] .sheet-scroll td { border-right-color:transparent; border-bottom-color:transparent; }
 .sheet-scroll td { cursor: cell; position: relative; }
 .sheet-scroll td.sheet-selected { outline: 2px solid #5b818d; outline-offset: -2px; }
 .sheet-scroll td span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-inline: 7px; }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { assertWorkspace, initialWorkspace, MAX_WORKSPACE_BYTES } from '../shared/workspace.mjs'
+import { assertWorkspace, initialWorkspace, MAX_WORKSPACE_BYTES } from '../../../shared/workspace.mjs'
 
 export async function writeAtomically(filename, text) {
   const temporaryFile = `${filename}.${randomUUID()}.tmp`

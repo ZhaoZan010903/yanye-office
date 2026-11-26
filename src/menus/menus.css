@@ -1,0 +1,31 @@
+.md-popover, .md-command-error {
+  position: fixed;
+  z-index: 80;
+  background: white;
+  color: var(--color-ink, #37352f);
+  border: 1px solid var(--color-hairline, #e9e7e4);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(15,15,15,.12);
+  font: 400 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+.md-context-wrap { display:flex; align-items:flex-start; max-width:calc(100vw - 8px); border:0; background:transparent; box-shadow:none; }
+.md-context-wrap .md-context { background:white; border:1px solid #e9e7e4; border-radius:4px; box-shadow:0 8px 24px rgba(15,15,15,.12); }
+.md-submenu { border-left:1px solid #e9e7e4; }
+.md-context button[aria-expanded=true] { background:#efedea; }
+.md-context { min-width: 194px; padding: 4px; max-height: calc(100dvh - 8px); overflow: auto; }
+.md-popover button { color: inherit; font: inherit; border: 0; border-radius: 4px; background: transparent; padding: 4px 8px; transition: background-color 150ms; }
+.md-context button { width: 100%; display: flex; text-align: left; align-items: center; justify-content: space-between; gap: 18px; }
+.md-context button.md-back { border-bottom: 1px solid #e9e7e4; color: #67655f; }
+.md-context kbd { color: #706e68; font: inherit; font-size: 11px; }
+.md-popover button:disabled { opacity: .43; }
+.md-popover button:not(:disabled):is(:hover,:focus-visible) { background-color: #efedea; }
+.md-popover button:focus-visible { outline: 1px solid currentColor; outline-offset: -2px; }
+.md-hover,.md-hover form,.md-hover label { display: flex; align-items: center; gap: 4px; }
+.md-hover { max-width: calc(100vw - 8px); padding: 3px; }
+.md-hover button { display: grid; place-items: center; min-height: 26px; }
+.md-hover button svg { width: 15px; height: 15px; }
+.md-hover input { width: 44px; border: 1px solid #e9e7e4; }
+.md-link-url { max-width: min(260px, 50vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-command-error { bottom: 18px; right: 18px; padding: 8px 12px; }
+@media (max-width:420px) { .md-context-wrap:has(.md-submenu) .md-context { min-width:0; width:calc(50vw - 6px); } .md-context kbd { display:none; } }
+@media (prefers-reduced-motion: reduce) { .md-popover button { transition: none; } }

@@ -4,7 +4,6 @@ import { Plugin } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
 import Placeholder from '@tiptap/extension-placeholder'
 import { TableKit } from '@tiptap/extension-table'
 import TaskItem from '@tiptap/extension-task-item'
@@ -12,18 +11,23 @@ import TaskList from '@tiptap/extension-task-list'
 import { Markdown } from '@tiptap/markdown'
 import {
   ArrowDownToLine, BookOpen, Bold, Check, ChevronRight, CircleAlert, CodeXml, Columns3, FilePlus2, Italic, List,
-  ListTree, LoaderCircle, MoreHorizontal, PanelRightClose, PanelRightOpen, Pilcrow, Plus, Redo2, Star, Undo2, X,
+  ListTree, LoaderCircle, MoreHorizontal, PanelRightClose, PanelRightOpen, Plus, Redo2, Star, Undo2, X,
 } from 'lucide-react'
 import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, pageTitle } from '../shared/workspace.mjs'
 import { blocks, BlockChoices, runBlock, slashBlocks } from './blocks.jsx'
 import { describeDocument, describeSource, preferDiskSource } from './markdown.js'
 import MarkdownFind from './MarkdownFind.jsx'
+import { MarkdownFence } from './MarkdownFence'
+import MarkdownFenceCompletion from './MarkdownFenceCompletion'
+import { MarkdownFile, markdownImages, relativeReference } from './MarkdownImages'
+import { MarkdownInlineMath } from './MarkdownInlineMath'
+import { openReading, writeReading } from './markdown-projection'
+import MarkdownContextTools from './menus/MarkdownContextTools.tsx'
 import { editSource, editorSource } from './markdown-search.js'
 import { IconButton, PageIcon } from './workspace-ui.jsx'
 import './modules/writing-tools.css'
 
 const MarkdownFigures=lazy(()=>import('./MarkdownFigures.jsx'))
-const MarkdownReading=lazy(()=>import('./MarkdownReading.jsx'))
 const LargeMarkdownSource=lazy(()=>import('./LargeMarkdownSource.jsx'))
 const focusBlock = active => Extension.create({
   name:'writingFocus',
@@ -81,7 +85,7 @@ function ContextPane({ info, selected, changeSelection, childPages, onOpenPage, 
   </aside>
 }
 
-function Toolbar({ editor, format, mode, setMode, sourceOnly, contextOpen, onContextToggle, page, onFavorite, onExport, onMenu, onCreateChild, tools }) {
+function Toolbar({ editor, format, mode, setMode, contextOpen, onContextToggle, page, onFavorite, onExport, onMenu, onCreateChild, tools }) {
   const [popup, setPopup] = useState('')
   const controls = useRef(null)
 
@@ -97,7 +101,7 @@ function Toolbar({ editor, format, mode, setMode, sourceOnly, contextOpen, onCon
     }
   }, [popup])
 
-  const disabled = mode!=='rich' || !editor
+  const disabled = mode!=='read' || !editor
   const run = command => () => editor?.chain().focus()[command]().run()
   const isTable = !disabled && format?.table
 
@@ -147,14 +151,11 @@ function Toolbar({ editor, format, mode, setMode, sourceOnly, contextOpen, onCon
     <div className="toolbar-spacer" />
     <div className="tool-group page-tools" aria-label="页面工具">
       <div className="mode-switch" aria-label="编辑模式">
-        <button type="button" aria-pressed={mode==='rich'} disabled={sourceOnly} onClick={() => { setPopup(''); setMode('rich') }}>
-          <Pilcrow size={15} aria-hidden="true" /><span>富文本</span>
+        <button type="button" aria-pressed={mode==='read'} title="在排版后的正文中直接编辑" onClick={() => { setPopup(''); setMode('read') }}>
+          <BookOpen size={15} aria-hidden="true"/><span>阅读</span>
         </button>
         <button type="button" aria-pressed={mode==='source'} onClick={() => { setPopup(''); setMode('source') }}>
           <CodeXml size={15} aria-hidden="true" /><span>源码</span>
-        </button>
-        <button type="button" aria-pressed={mode==='read'} onClick={() => { setPopup(''); setMode('read') }}>
-          <BookOpen size={15} aria-hidden="true"/><span>阅读</span>
         </button>
       </div>
       <span className="tool-divider page-tools-divider" />
@@ -169,15 +170,15 @@ function Toolbar({ editor, format, mode, setMode, sourceOnly, contextOpen, onCon
 
 export function DocumentEditor({
   page, children: childPages, focusTitle, saveState, onSave, contextOpen, onContextToggle, onChange, onOpenPage,
-  onCreateChild, onFavorite, onExport, onMenu, onExternalLink,
+  onCreateChild, onFavorite, onExport, onMenu, onExternalLink, onOpenFileLink,
 }) {
   const [largeDiskFile]=useState(()=>preferDiskSource(page))
   const [initialSource] = useState(() => largeDiskFile ? {headings:[],characters:0,completed:0,total:0,sourceOnly:false} : describeSource(page.markdown))
-  const [mode, setMode] = useState(() => initialSource.sourceOnly || largeDiskFile ? 'source' : 'rich')
+  const [mode, setMode] = useState(() => largeDiskFile ? 'source' : 'read')
   const parsedSource=useRef({raw:largeDiskFile?null:page.markdown,info:initialSource})
   const [largeOutline,setLargeOutline]=useState(initialSource)
   useEffect(()=>{
-    if (!largeDiskFile || mode==='rich' || parsedSource.current.raw===page.markdown) return
+    if (!largeDiskFile || mode==='read' || parsedSource.current.raw===page.markdown) return
     const timer=setTimeout(()=>{
       const info=describeSource(page.markdown)
       parsedSource.current={raw:page.markdown,info}
@@ -186,7 +187,7 @@ export function DocumentEditor({
     return ()=>clearTimeout(timer)
   },[largeDiskFile,mode,page.markdown])
   const sourceInfo = useMemo(() => {
-    if(mode==='rich') return null
+    if(mode==='read') return null
     if(largeDiskFile) return largeOutline
     if(parsedSource.current.raw!==page.markdown) parsedSource.current={raw:page.markdown,info:describeSource(page.markdown)}
     return parsedSource.current.info
@@ -194,43 +195,73 @@ export function DocumentEditor({
   const [selectedHeading, setSelectedHeading] = useState(null)
   const [find,setFind]=useState(null), [figures,setFigures]=useState(false)
   const [focus,setFocus]=useState(false), [typewriter,setTypewriter]=useState(false)
+  const [assetError,setAssetError]=useState('')
   const focusRef=useRef(false), scrollRef=useRef(null), rootRef=useRef(null)
   const titleInput = useRef(null)
   const sourceInput = useRef(null)
-  const editTarget=useRef(null)
   const sourceSelection=useRef(null)
-  const lastRichText = useRef(initialSource.sourceOnly || largeDiskFile ? '' : page.markdown)
-  const handlers = useRef({ onCreateChild, onExternalLink, onChange })
-  handlers.current = { onCreateChild, onExternalLink, onChange }
+  const lastRichText = useRef(null)
+  const projection = useRef(null)
+  const projectionEditor = useRef(null)
+  function openReference(href) {
+    if (href.startsWith('#')) {
+      let target = href.slice(1)
+      try { target=decodeURIComponent(target) } catch { /* Use the literal fragment. */ }
+      const duplicates = new Map()
+      for (const heading of rootRef.current.querySelectorAll('.writing-area :is(h1,h2,h3,h4,h5,h6)')) {
+        const text = heading.textContent.trim()
+        const slug = text.toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\s-]/gu,'').replace(/\s+/gu,'-')
+        const n=duplicates.get(slug) ?? 0
+        duplicates.set(slug,n+1)
+        if (target===text || target===(n ? slug+'-'+n : slug)) {
+          heading.scrollIntoView({block:'start'})
+          return
+        }
+      }
+      setAssetError('未找到文内标题 '+target)
+    } else if (relativeReference(href)) {
+      if (!page.disk || !onOpenFileLink) setAssetError('将文稿保存到磁盘后可打开相对链接。')
+      else Promise.resolve(onOpenFileLink(href)).catch(error=>setAssetError(String(error?.message || error)))
+    } else if (/^https?:/iu.test(href)) onExternalLink(href)
+    else setAssetError('此链接使用了不支持的协议。')
+  }
+  const handlers = useRef(null)
+  handlers.current = { onCreateChild, openReference, onChange, mode }
 
   const options = useMemo(() => ({
+    // The desktop shell lazy-loads this view while launch files are arriving.
+    // Construct the editor after commit so an abandoned Suspense render cannot
+    // leave a destroyed instance for the layout effect to populate.
+    immediatelyRender: false,
     extensions: [
-      StarterKit.configure({ underline: false, link: { openOnClick: false, HTMLAttributes: { title: 'Ctrl + 单击打开链接' } } }),
+      StarterKit.configure({ codeBlock: false, trailingNode: false, underline: false, link: { openOnClick: false, HTMLAttributes: { title: 'Ctrl + 单击打开链接' } } }),
+      MarkdownFence,
+      MarkdownInlineMath,
       TaskList,
       TaskItem.configure({ nested: true, a11y: { checkboxLabel: node => `待办 ${node.textContent || '空白条目'}` } }),
       TableKit,
-      Image.configure({ allowBase64: true }),
+      markdownImages(() => handlers.current.mode === 'read', setAssetError),
       Placeholder.configure({ placeholder: '开始写作，或输入 / 插入内容块' }),
       Markdown.configure({ markedOptions: { gfm: true } }),
       focusBlock(()=>focusRef.current),
       slashBlocks(() => handlers.current.onCreateChild()),
     ],
-    content: lastRichText.current,
-    contentType: 'markdown',
+    content: '',
     editorProps: {
       attributes: { class: 'writing-area', 'aria-label': '正文编辑器', 'aria-multiline': 'true', role: 'textbox' },
       handleClick: (_view, _pos, event) => {
         const anchor = event.target.closest?.('a[href]')
         if (!anchor) return false
         event.preventDefault()
-        if (event.ctrlKey || event.metaKey) handlers.current.onExternalLink(anchor.href)
+        if (event.ctrlKey || event.metaKey) handlers.current.openReference(anchor.getAttribute('href'))
         return false
       },
     },
     onUpdate: ({ editor }) => {
-      const markdown = editSource(lastRichText.current, editor.getMarkdown())
+      if (!projection.current) return
+      const markdown = writeReading(editor, projection.current)
       if (handlers.current.onChange({ markdown })) lastRichText.current = markdown
-      else editor.commands.setContent(lastRichText.current, { contentType: 'markdown', emitUpdate: false })
+      else projection.current = openReading(editor, lastRichText.current)
     },
   }), [])
   const editor = useEditor(options, [])
@@ -240,7 +271,7 @@ export function DocumentEditor({
     heading: editor.getAttributes('heading').level ?? 0, list: editor.isActive('bulletList'), table: editor.isActive('table'),
   }) : null })
 
-  const richDoc = editor?.state.doc
+  const richDoc = useEditorState({ editor, selector: ({ editor }) => editor?.state.doc ?? null, equalityFn: Object.is })
   const info = useMemo(() => sourceInfo || (richDoc ? describeDocument(editor) : initialSource), [richDoc, editor, initialSource, sourceInfo])
   const currentHeading = info.headings.some(heading => heading.position === selectedHeading) ? selectedHeading : info.headings[0]?.position
   function toggleFocus() {
@@ -253,7 +284,6 @@ export function DocumentEditor({
     if (chain) (level ? chain.setHeading({level}) : chain.setParagraph()).run()
   }
   function openFind(next) {
-    if (mode==='read') setMode('source')
     setFind(next)
     if (find===next) {
       const query=rootRef.current?.querySelector('.md-find input')
@@ -263,11 +293,11 @@ export function DocumentEditor({
   }
   function closeFind() {
     setFind(null)
-    if (mode==='rich') editor?.commands.focus()
+    if (mode==='read') editor?.commands.focus()
     else sourceInput.current?.focus()
   }
   useEffect(()=>{
-    if (!editor || !typewriter || mode!=='rich') return
+    if (!editor || !typewriter || mode!=='read') return
     let frame
     function center() {
       cancelAnimationFrame(frame)
@@ -288,24 +318,21 @@ export function DocumentEditor({
     if (e.defaultPrevented || e.nativeEvent.isComposing || e.altKey) return
     const mod=e.ctrlKey || e.metaKey, key=e.key.toLowerCase()
     let action
-    if (mod && key==='/') action=()=>switchMode(mode==='source' ? (sourceInfo?.sourceOnly?'read':'rich') : 'source')
+    if (mod && key==='/') action=()=>switchMode(mode==='source' ? 'read' : 'source')
     else if (mod && (key==='f' || key==='h')) action=()=>openFind(key==='h'?'replace':'find')
     else if (!mod && key==='escape' && find) action=closeFind
-    else if (!mod && key==='f8' && mode==='rich') action=toggleFocus
-    else if (!mod && key==='f9' && mode==='rich') action=()=>setTypewriter(x=>!x)
-    else if (mod && !e.shiftKey && /^[0-6]$/.test(key) && mode==='rich') action=()=>heading(Number(key))
+    else if (!mod && key==='f8' && mode==='read') action=toggleFocus
+    else if (!mod && key==='f9' && mode==='read') action=()=>setTypewriter(x=>!x)
+    else if (mod && !e.shiftKey && /^[0-6]$/.test(key) && mode==='read') action=()=>heading(Number(key))
     if (action) {e.preventDefault();action()}
   }
 
-  // Opening an externally changed Markdown file can reuse this editor instance.
-  useEffect(() => {
-    if (!editor || mode !== 'rich' || lastRichText.current === page.markdown) return
-    if (describeSource(page.markdown).sourceOnly) {
-      setMode('source')
-      return
-    }
+  useLayoutEffect(() => {
+    if (!editor || editor.isDestroyed || mode !== 'read') return
+    if (projectionEditor.current === editor && lastRichText.current === page.markdown) return
+    projection.current = openReading(editor, page.markdown)
     lastRichText.current = page.markdown
-    editor.commands.setContent(page.markdown, {contentType:'markdown', emitUpdate:false})
+    projectionEditor.current = editor
   }, [editor, mode, page.markdown])
 
   useEffect(() => {
@@ -319,49 +346,26 @@ export function DocumentEditor({
 
   function switchMode(next) {
     if(next===mode) return
-    if(next==='rich') {
-      const current=largeDiskFile && parsedSource.current.raw!==page.markdown ? describeSource(page.markdown) : sourceInfo
-      if (current?.sourceOnly || !editor) return
-    }
+    if (next==='read' && !editor) return
     if (mode==='source' && sourceInput.current) {
       const text=sourceInput.current
       sourceSelection.current=text.selectedSource ? text.selectedSource() :
         {start:text.selectionStart,end:text.selectionEnd,direction:text.selectionDirection,scroll:text.scrollTop}
     }
-    if (next === 'rich' && lastRichText.current !== page.markdown) {
-      editor.commands.setContent(page.markdown, { contentType: 'markdown', emitUpdate: false })
-      lastRichText.current = page.markdown
-    }
-    if (next==='read') {setFind(null);setFigures(false)}
     setSelectedHeading(null)
     setMode(next)
   }
 
-  function editFigure(item) {
-    editTarget.current=item
-    setMode('source')
-  }
   useLayoutEffect(()=>{
-    const input=sourceInput.current, item=editTarget.current
-    if (mode!=='source' || !input) return
-    if (!item) {
-      if (sourceSelection.current) {
-        const {start,end,direction,scroll}=sourceSelection.current
-        if(input.selectSource) input.selectSource(start,end,direction,scroll)
-        else {
-          input.focus({preventScroll:true})
-          input.setSelectionRange(start,end,direction)
-          input.scrollTop=scroll
-        }
-      }
-      return
+    const input=sourceInput.current, previous=sourceSelection.current
+    if (mode!=='source' || !input || !previous) return
+    const {start,end,direction,scroll}=previous
+    if(input.selectSource) input.selectSource(start,end,direction,scroll)
+    else {
+      input.focus({preventScroll:true})
+      input.setSelectionRange(start,end,direction)
+      input.scrollTop=scroll
     }
-    editTarget.current=null
-    if(input.selectSource) {input.selectSource(item.bodyStart,item.bodyEnd);return}
-    input.focus()
-    input.setSelectionRange(item.bodyStart,item.bodyEnd)
-    input.scrollTop=Math.max(0,(item.line-1)*parseFloat(getComputedStyle(input).lineHeight)-input.clientHeight/3)
-    input.scrollIntoView({block:'nearest'})
   },[mode])
 
   function jumpTo(heading) {
@@ -374,21 +378,22 @@ export function DocumentEditor({
       input.setSelectionRange(heading.position, heading.position)
       const lineHeight = parseFloat(getComputedStyle(input).lineHeight)
       input.scrollTop = Math.max(0, (heading.line - 2) * lineHeight)
-    } else if (mode==='read') {
-      const headings=rootRef.current.querySelectorAll('.md-reading :is(h1,h2,h3,h4,h5,h6)')
-      headings[info.headings.indexOf(heading)]?.scrollIntoView({block:'start'})
     } else {
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       editor?.view.nodeDOM(heading.position)?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' })
     }
   }
 
-  return <section ref={rootRef} className={'document md-workspace'+(focus && mode==='rich'?' md-focus':'')+(typewriter && mode==='rich'?' md-typewriter':'')}
+  return <section ref={rootRef} className={'document md-workspace'+(focus && mode==='read'?' md-focus':'')+(typewriter && mode==='read'?' md-typewriter':'')}
     aria-label="写作区" onKeyDownCapture={writingKey}>
-    <Toolbar editor={editor} format={format} mode={mode} setMode={switchMode} sourceOnly={sourceInfo?.sourceOnly}
+    <Toolbar editor={editor} format={format} mode={mode} setMode={switchMode}
       contextOpen={contextOpen} onContextToggle={onContextToggle} page={page} onFavorite={onFavorite}
       onExport={onExport} onMenu={onMenu} onCreateChild={onCreateChild}
       tools={{heading,find:openFind,toggleFocus,focus,toggleTypewriter:()=>setTypewriter(v=>!v),typewriter,toggleFigures:()=>setFigures(v=>!v),figures}} />
+    <MarkdownContextTools editor={editor} rootRef={rootRef} sourceRef={sourceInput} sourceMode={mode==='source'} onLink={openReference}/>
+    {assetError && <div className="md-asset-error" role="alert"><span>{assetError}</span>
+      <button type="button" onClick={()=>setAssetError('')} aria-label="关闭资源提示"><X size={14}/></button></div>}
+    {mode === 'read' && <MarkdownFenceCompletion editor={editor}/>}
     {find && <MarkdownFind editor={editor} sourceRef={sourceInput} source={mode==='source'?editorSource(page.markdown):null}
       replacing={find==='replace'} close={closeFind}/>}
     {figures && <Suspense fallback={<p role="status">正在打开预览…</p>}><MarkdownFigures markdown={page.markdown} close={()=>setFigures(false)}/></Suspense>}
@@ -402,17 +407,12 @@ export function DocumentEditor({
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
               event.preventDefault()
               if (mode === 'source') sourceInput.current?.focus()
-              else if (mode==='read') rootRef.current.querySelector('.md-reading')?.focus()
               else editor?.commands.focus('start')
             }} />
           <div className="document-rule" aria-hidden="true" />
-          <div hidden={mode !== 'rich'}><EditorContent editor={editor} /></div>
-          {mode==='read' && <Suspense fallback={<p role="status">正在排版…</p>}>
-            <MarkdownReading markdown={page.markdown} edit={editFigure} onLink={onExternalLink}/>
-          </Suspense>}
+          <div hidden={mode !== 'read'}><MarkdownFile.Provider value={page.disk?.id}><EditorContent editor={editor} /></MarkdownFile.Provider></div>
           {(mode === 'source' || largeDiskFile) && <div className="source-editor" hidden={mode!=='source'}>
-            {sourceInfo?.sourceOnly && <p className="source-note"><CircleAlert size={15} />本文包含扩展语法，使用源码模式编辑可保留其原始格式。</p>}
-            {largeDiskFile && !sourceInfo?.sourceOnly && <p className="source-note"><CodeXml size={15}/>大文档已打开源码。可切换到富文本编辑或阅读。</p>}
+            {largeDiskFile && <p className="source-note"><CodeXml size={15}/>大文档已打开源码。切换到阅读可在排版后的正文中编辑。</p>}
             {largeDiskFile ? <Suspense fallback={<p role="status">正在打开源码…</p>}>
               <LargeMarkdownSource ref={sourceInput} markdown={page.markdown} onChange={onChange} visible={mode==='source'}/>
             </Suspense> : <textarea ref={sourceInput} aria-label="Markdown 源码" value={editorSource(page.markdown)} maxLength={MAX_MARKDOWN_LENGTH}
@@ -426,7 +426,7 @@ export function DocumentEditor({
     <footer className="status-bar">
       <SaveState state={saveState} onSave={onSave} />
       <div className="status-details"><span>{info.characters.toLocaleString('zh-CN')} 字符</span><span className="status-separator" />
-        <span>{mode === 'source' ? 'Markdown 源码' : mode==='read' ? 'Markdown 阅读' : page.disk ? 'Markdown' : '电子文档 · 仅本机'}</span></div>
+        <span>{mode === 'source' ? 'Markdown 源码' : page.disk ? 'Markdown 阅读' : '电子文档 · 仅本机'}</span></div>
     </footer>
   </section>
 }

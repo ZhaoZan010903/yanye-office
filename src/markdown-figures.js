@@ -29,7 +29,7 @@ export function markdownFigures(markdown) {
     if (begin) {
       const lang=begin[2].toLowerCase()
       fence={close:new RegExp('^ {0,3}'+begin[1][0]+'{'+begin[1].length+',}\\s*$'),line:i+1,from:start,bodyStart:next,
-        kind:lang==='mermaid'?'mermaid':['math','latex'].includes(lang)?'math':null}
+        kind:['mermaid','meried'].includes(lang)?'mermaid':['math','latex'].includes(lang)?'math':null}
       continue
     }
     if (trimmed==='$$') {math={kind:'math',line:i+1,from:start,bodyStart:next};continue}

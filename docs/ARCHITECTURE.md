@@ -1,5 +1,18 @@
 # 砚页 YanYe · Windows 本地端技术选型与架构
 
+## 0.6 桌面运行时与扩展入口
+
+Tauri 2 在 Windows WebView2 中加载随程序嵌入的 Vite 资源。React 管理编辑视图，TypeScript 描述桌面调用、菜单、围栏和功能区。已有的 JSX 编辑器由同一入口加载。Rust 在后台线程执行 SQLite 事务、修订重放、文件摘要计算和格式交换。Word 和演示稿的 PDF 输出使用 WebView2 打印引擎。[Tauri 命令模型](https://v2.tauri.app/develop/calling-rust/) · [WebView2 打印](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/print)
+
+| 修改目标 | 扩展位置 | 需要保持的约定 |
+| --- | --- | --- |
+| 桌面能力 | [TypeScript 桥](../src/desktop/bridge.ts)、[Rust 入口](../src-tauri/src/main.rs) | 桥接在渲染 React 前就绪。渲染进程持有文件 ID，路径与原生对话框由宿主管理 |
+| 保存与恢复 | [写入队列](../src/desktop/staged-writes.ts)、[工作区事务](../src-tauri/src/workspace.rs)、[磁盘文件](../src-tauri/src/files.rs) | 增量按修订顺序提交。失败时保留未确认队首。工作区修订和磁盘原件摘要分别校验 |
+| 围栏语言或图形 | [语言与别名](../src/markdown-languages.ts)、[代码块](../src/MarkdownFence.tsx)、[源码映射](../src/markdown-projection.ts) | 引擎按需载入。阅读视图将改动写回原文。特殊图形保留可编辑的围栏文本 |
+| 编辑命令与功能区 | [Markdown 上下文菜单](../src/menus/MarkdownContextTools.tsx)、[Office 功能区](../src/office/Ribbon.tsx) | 菜单调用编辑器命令。命令可用条件、当前选区和撤销由所属编辑器管理 |
+
+0.5 工作区与文件中心继续使用原目录。数据库升级与文件格式逻辑可以用独立临时目录验证，桌面验收还会启动真实 WebView2 窗口。以下章节记录此前各版本的架构和选型背景。
+
 ## 0.5.0 文件编辑路径
 
 磁盘原件和工作区草稿共享文件绑定与修订摘要。DOCX、XLSX、PPTX 的常规编辑路径将支持的 Office 对象映射为可修改的本地内容。原版式替换路径按绑定重新读取原件，校验摘要，仅重写匹配的文字部件，再通过主进程排他创建副本。PDF 编辑保留页序、旋转和批注记录，生成副本时才应用到 PDF。Markdown 公式字体、图表渲染器和传统中文文本编码表均随应用提供，按需加载。[能力范围与原应用回读](LOCAL_OFFICE.md)
@@ -11,7 +24,7 @@
 - **保存。** React 对已接受的工作区修改分配修订和操作 ID。预加载接口只传本次改变的页面字段。电子文档正文使用 UTF-16 偏移量和局部替换，TXT 正文和混合行尾映射也可局部替换。主进程保留未确认批次，从第一个编辑开始安排 180 毫秒的写入窗口，连续输入仍能得到中间确认。
 - **落盘与恢复。** 独立的 Electron utilityProcess 使用运行时的 `node:sqlite`，启用 WAL、外键和 `synchronous=FULL`。正文差异、字段、操作摘要和修订在同一事务内提交。主进程根据确认的修订回复窗口。辅助进程中断后可重启、重投同一批次。每 128 项正文修改压实对应文稿。
 - **升级。** 首次启动在事务内导入旧 JSON，读回核对通过后公布库版本。迁移中断可重试。旧 JSON、文件中心索引和外部 Office 原件保留。磁盘文件仍使用独立的原件摘要与写回确认。工作区备份可以在应用正常退出后复制完整用户目录。
-- **当前规模。** 启动时仍会装入工作区内容。电子文档和 TXT 已有文本差异存储，结构化 Office 内容更新按单页字段保存。FTS5 大库索引、附件独立存储和按可见区读取仍是下一阶段设计。此版沿用 24 MiB 工作区和 2,000 页上限。[存储进程](../electron/workspace-process.mjs) · [事务与迁移](../electron/workspace-database.mjs) · [离线恢复测试](../test/offline-desktop.mjs)
+- **当前规模。** 启动时仍会装入工作区内容。电子文档和 TXT 已有文本差异存储，结构化 Office 内容更新按单页字段保存。FTS5 大库索引、附件独立存储和按可见区读取仍是下一阶段设计。此版沿用 24 MiB 工作区和 2,000 页上限。[存储进程](https://github.com/ZhaoZan010903/yanye-office/blob/9b14908e6a5fdbee76efbd9af0a41c862f01b0d7/electron/workspace-process.mjs) · [事务与迁移](https://github.com/ZhaoZan010903/yanye-office/blob/9b14908e6a5fdbee76efbd9af0a41c862f01b0d7/electron/workspace-database.mjs) · [离线恢复测试](../test/offline-desktop.mjs)
 
 PDF 用本地 PDF.js Worker、字体、字符映射和解码资源；工作区只保存磁盘文件绑定。TXT 采用 CodeMirror 6，保留编码、BOM 和换行映射。Office 适配器把受支持的字形、段落和单元格属性写成原生 OOXML。下文的决策表保留 0.3.0 选型时的比较与后续门槛。
 
@@ -194,7 +207,7 @@ SVG 编辑区按节点、连接线和笔迹渲染。边保存端点节点 ID 和
 
 编辑、放映和导出使用相同的版式定义。文档大纲转换读取当时的 Markdown，创建独立幻灯片。PptxGenJS 将文字、图片与备注写入 PPTX。导入使用 JSZip 读取 Office Open XML 部件，并将支持的文字、备注和配图映射到砚页版式。[版式与文档转换](../src/modules/slides-model.js) · [PPTX 适配器](../src/modules/slides-pptx.js)
 
-PDF 导出时，渲染进程建立完整的 16∶9 打印页，等待字体与图片就绪，再由 Electron 调用 `webContents.printToPDF` 输出。打印样式按页分页，并隐藏桌面控件与讲者备注。[演示文稿界面](../src/modules/Slides.jsx) · [桌面主进程](../electron/main.mjs)
+PDF 导出时，渲染进程建立完整的 16∶9 打印页，等待字体与图片就绪，再由 Electron 调用 `webContents.printToPDF` 输出。打印样式按页分页，并隐藏桌面控件与讲者备注。[演示文稿界面](../src/modules/Slides.jsx) · [桌面主进程](https://github.com/ZhaoZan010903/yanye-office/blob/9b14908e6a5fdbee76efbd9af0a41c862f01b0d7/electron/main.mjs)
 
 ## 验证与发布
 

@@ -2,13 +2,15 @@
 
 砚页是一款面向 Windows 的开源本地办公软件。名字取自砚台与书页。你可以在同一棵页面树里写 Markdown、算预算、排项目进度、画流程，再把文档大纲整理成演示文稿。
 
-**0.5.0 在 Windows 上离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
+**0.6.0 使用 Tauri 2 和 Windows WebView2，在本机离线工作。** 在文件中心用 `Ctrl+O` 打开 DOCX、XLSX、PPTX、PDF、Markdown 或 TXT。选择侧栏「工作区文稿」旁的加号，然后选「电子文档」，即可断网写作。电子文档自动保存到本机，导出一份 Markdown 可交给别人。磁盘文件用 `Ctrl+S` 写回，用 `Ctrl+Shift+S` 另存。[产品设计说明](docs/PRODUCT_SPEC.md) · [技术架构说明](docs/ARCHITECTURE.md) · [界面与动效规范](docs/STYLE_SPEC.md)
 
 ![砚页文件中心的新建入口、最近文件与本地目录](docs/files.png)
 
 新版支持按原件替换 DOCX、XLSX、PPTX 文字、编辑 Word 页码域、创建 Excel 原生彩色图表、整理与批注 PDF，以及 PPTX 定时换页。打开文件中心即可开始。[本地办公功能、REA 样本与回读验证](docs/LOCAL_OFFICE.md)
 
-磁盘 Markdown 文件达到 256 KiB 时先显示可编辑源码。需要排版时，可切换到「富文本」或「阅读」。小文件按语法选择富文本或源码；包括自定义扩展的文件可直接编辑原文。
+Markdown 的「阅读」和「源码」均可编辑。在「阅读」中直接修改排版后的文稿，在「源码」中修改原始标记。输入三个反引号与语言名后按 Enter 创建围栏，选择 Java 可高亮，选择 Mermaid 可在图形和图源之间切换。磁盘 Markdown 达到 256 KiB 时优先打开源码。
+
+![Windows 发行版中的 Markdown 阅读视图，含 Java 高亮和可编辑的 Mermaid 流程图](docs/markdown-windows.png)
 
 ## 产品设计
 
@@ -27,7 +29,7 @@
 | Word 文档 | 分别设定中西文字体、中文字号、字色和荧光标记，编辑上下标、首行缩进、段前段后间距和对齐。支持表格、插图、查找替换、分页与页边距，首页及奇偶页页眉页脚、当前页和总页数域；在正文选区新增、定位和删除署名批注 | 新建、打开、保存 DOCX，按纸型导出 PDF |
 | PDF 阅读器 | 缩略图、跳页、缩放、选择和查找带文字层的内容，扫描件逐页阅读。字体、字符映射与解码器随包提供 | 写入标准便签与选区高亮，旋转、调序、按范围提取或追加另一份 PDF 后保存独立副本 |
 | TXT 编辑器 | 查找替换、跳行、书签、行排序、去重、移动行、行列位置和撤销。自动识别 UTF-8 和带标记的 UTF-16，无法确定时选择编码并预览 | 保留 BOM 和换行，包括同一文件中的混合换行。GBK / GB18030 可按原编码保存，遇到无法无损编码的字符可另存 UTF-8 副本 |
-| Markdown 文档 | 在富文本与源码间切换，通过 `/` 插入块，沿标题大纲定位，勾选待办，查找替换、专注及打字机模式、离线公式与 Mermaid 图 | 导入和导出 Markdown |
+| Markdown 文档 | 在可编辑的阅读视图与源码间切换，通过 `/` 插入块，沿标题大纲定位，勾选待办，查找替换、专注及打字机模式、离线公式与 Mermaid 图 | 导入和导出 Markdown |
 | 电子表格 | 选区字体、字号、下划线、删除线、字色和底色、边框、水平及垂直对齐，常用数字格式。支持合并拆分、跨表公式、排序筛选、冻结窗格、下拉验证、数值条件格式、条件统计与查找函数、带图例及配色的多系列条形图 | CSV 交换二维值，XLSX 保存工作表、公式、支持的样式、合并区域、规则及原生可编辑图表 |
 | 多维表格 | 自定义字段、记录详情、同表关联及数值计算，同一组记录可切换表格、看板、日历 | JSON 备份保留字段结构与关联，CSV、XLSX 用于交换二维数据 |
 | 流程图与白板 | 放置流程步骤、判断、起止、泳道、便签与文字，手绘、拖动节点、标注连线 | JSON 可恢复编辑，SVG、PNG 导出画面，Mermaid 导出流程结构 |
@@ -43,7 +45,7 @@
 
 ## 在 Windows 上运行
 
-开发环境使用 Node.js 24 和 pnpm 11.25.0。在 PowerShell 运行以下命令。
+安装 Windows 10/11 x64、Microsoft Edge WebView2 Runtime、Node.js 24、pnpm 11 和 Rust 稳定版。常规开发环境使用 Visual Studio Build Tools 的 C++ 桌面工作负载。[Tauri Windows 环境说明](https://v2.tauri.app/start/prerequisites/)
 
 ```powershell
 git clone https://github.com/ZhaoZan010903/yanye-office.git
@@ -52,27 +54,21 @@ pnpm install --frozen-lockfile
 pnpm start
 ```
 
-`pnpm start` 构建界面并启动 Electron。运行 `pnpm dev` 可以单独启动 Vite 开发服务器。文件对话框和本地工作区存储由桌面主进程提供。
+`pnpm start` 或 `pnpm dev` 启动 React 热更新与 Tauri 原生窗口。Rust 管理文件对话框、工作区和磁盘文件。可用 `pnpm dev:renderer` 单独运行 Vite 进行组件开发。
 
 ## 验证与打包
 
 ```powershell
+pnpm typecheck
 pnpm test
-pnpm test:desktop
+cargo test --manifest-path src-tauri/Cargo.toml
 pnpm package:win
+pnpm test:desktop
 ```
 
-`pnpm test` 运行模型和格式交换的单元测试。`pnpm test:desktop` 构建应用并运行 Electron 桌面流程测试。打包后保留整个 `release\YanYe-win32-x64` 目录，双击其中的 `YanYe.exe` 即可运行。
+`package:win` 生成当前用户安装包和便携 ZIP，均在 `release` 下按版本命名。解压便携包后运行同目录中的 `YanYe.exe`。两种发行方式都使用系统 WebView2，离线机器需提前安装该运行时。安装版在 Windows「打开方式」中注册支持的格式。
 
-安装 Microsoft Office 的 Windows 开发机可运行前两条命令验证真实文件往返。装有 WPS 文字和表格时，可运行第三条核对其读取结果。使用 PowerShell 7，测试样本均在临时目录中创建。
-
-```powershell
-node test/word-desktop.mjs release/YanYe-win32-x64/YanYe.exe
-.\test\microsoft-interop.ps1 -Executable .\release\YanYe-win32-x64\YanYe.exe
-.\test\wps-interop.ps1
-```
-
-依赖安装完成后，也可以离线打包。在 PowerShell 设置 `$env:YANYE_ELECTRON_ZIP_DIR` 指向保存对应版本 Electron Windows x64 ZIP 的目录，再执行 `pnpm package:win`。打包脚本会使用已安装 Electron 包中的 SHA-256 校验和核对该文件。
+`test:desktop` 在独立的临时用户目录里运行已构建的 Windows 程序，核对旧 SQLite、Markdown 磁盘保存与异常退出恢复。可传入 exe 的绝对路径指定构建。格式变更可按需运行原应用回读用例，性能基准由开发者手动运行。[0.5 桌面测试与历史源码](https://github.com/ZhaoZan010903/yanye-office/tree/9b14908e6a5fdbee76efbd9af0a41c862f01b0d7)
 
 ## 本地数据
 
@@ -89,6 +85,7 @@ node test/word-desktop.mjs release/YanYe-win32-x64/YanYe.exe
 | 0.3 · 本地文件与 Office 编辑 | 文件中心、DOCX 文字处理与 PDF、XLSX 选区与格式、PPTX 文件读写、多文件标签与原件保护 |
 | 0.4 · 断网文稿与文件阅读 | 电子文档增量保存、异常退出恢复、旧工作区迁移、PDF 阅读、TXT 编辑及 Word / Excel 排版增强 |
 | 0.5 · 本地格式编辑 | 原版式文字替换、页眉页脚和域、原生图表与规则、形状与放映切换、PDF 页面整理与批注、Markdown 和文本工具 |
+| 0.6 · 本地编辑体验 | Tauri 与 Rust 宿主、两种可编辑 Markdown 视图、语言围栏、上下文菜单与 Office 功能区 |
 | 后续本地里程碑 | 分块按需读入、附件与大库索引、文稿引用、深度排版、专业图形与更多格式互操作 |
 | 最后 · 团队文档协作 | 全部本地里程碑完成后，再开发账号、共享权限、评论、多人同步与冲突处理 |
 

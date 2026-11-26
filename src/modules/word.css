@@ -57,6 +57,7 @@
 .word-status { color:#69675f; font-size:12px; border-top:1px solid #e9e7e4; border-bottom:0; gap:12px; }
 .word-status label { margin-left:auto; }
 @media print {
+ html:has(.word-print-root), body:has(> .word-print-root) { background: #fff !important; }
  .word-print-root,.word-print-root .word-prose { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
  .word-print-root .word-page-break { break-before:page; border:0; height:0; margin:0; }
  .word-print-root tr { break-inside:avoid; }

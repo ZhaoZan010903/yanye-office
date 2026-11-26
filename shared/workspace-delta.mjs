@@ -1,17 +1,24 @@
 import { MAX_PAGES, MAX_WORKSPACE_BYTES, assertWorkspace, cacheTxtPageSize, workspaceBytes } from './workspace.mjs'
 
-// Offsets count UTF-16 code units, as in the editor. A splice can cross a
-// surrogate boundary, so offsets and inserted strings must round-trip exactly.
+// Both editors address text in UTF-16 units. Keep complete code points in new
+// splice payloads so a change such as 😀 → 😁 can also cross a UTF-8 IPC boundary.
+function splitsPair(value, offset) {
+  const left = value.charCodeAt(offset - 1), right = value.charCodeAt(offset)
+  return left >= 0xd800 && left <= 0xdbff && right >= 0xdc00 && right <= 0xdfff
+}
+
 function textChange(before, after) {
   let start = 0
   const shortest = Math.min(before.length, after.length)
   const step = 4096
   while (start + step <= shortest && before.slice(start, start + step) === after.slice(start, start + step)) start += step
   while (start < shortest && before.charCodeAt(start) === after.charCodeAt(start)) start++
+  if (splitsPair(before, start) || splitsPair(after, start)) start--
   let end = 0
   while (end + step <= shortest - start &&
     before.slice(before.length - end - step, before.length - end) === after.slice(after.length - end - step, after.length - end)) end += step
   while (end < shortest - start && before.charCodeAt(before.length - end - 1) === after.charCodeAt(after.length - end - 1)) end++
+  if (splitsPair(before, before.length - end) || splitsPair(after, after.length - end)) end--
   return { start, removed: before.length - start - end, inserted: after.slice(start, after.length - end) }
 }
 
@@ -42,7 +49,10 @@ function plainTextDelta(before, after) {
     if (Object.hasOwn(after, key) && after[key] !== before[key]) {
       if (typeof after[key] !== 'string' || (before[key] !== undefined && typeof before[key] !== 'string')) return null
       const known = key === 'text' ? knownTxtChanges.get(after) : undefined
-      delta[key] = known?.before.deref() === before ? known.patch : textChange(before[key] ?? '', after[key])
+      const patch = known?.before.deref() === before ? known.patch : undefined
+      const previous = before[key] ?? ''
+      delta[key] = patch && !splitsPair(previous, patch.start) && !splitsPair(previous, patch.start + patch.removed)
+        ? patch : textChange(previous, after[key])
     }
   }
   return delta
@@ -76,7 +86,8 @@ export function workspaceDelta(before, after) {
           change.plainText = delta
           delete set.content
           const known = knownTxtChanges.get(page.content)
-          cacheTxtPageSize(old, page, delta, known?.before.deref() === old.content ? known.textWindow : undefined)
+          const exact = known?.before.deref() === old.content && delta.text === known.patch
+          cacheTxtPageSize(old, page, delta, exact ? known.textWindow : undefined)
         }
       }
       if (change.text || change.plainText || unset.length || Object.keys(set).length) changes.push(change)

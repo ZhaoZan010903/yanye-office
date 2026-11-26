@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { test } from 'node:test'
-import { WorkspaceStore } from '../electron/store.mjs'
+import { WorkspaceStore } from './fixtures/v05/store.mjs'
 import { addPage, assertWorkspace, initialWorkspace, makePage, movePage, restorePage, trashPage, updatePage, visiblePages } from '../shared/workspace.mjs'
 import { describeSource } from '../src/markdown.js'
 

@@ -40,4 +40,10 @@ export function findText(doc, term) {
 
 export function validColor(value) { return /^#[a-f0-9]{6}$/i.test(value ?? '') }
 export function validFont(value) { return typeof value === 'string' && /^[\p{L}\p{N} ._-]{1,64}$/u.test(value) }
+export const highlights = {
+  yellow:['黄色','#ffff00'], green:['绿色','#00ff00'], cyan:['青色','#00ffff'], magenta:['品红','#ff00ff'],
+  blue:['蓝色','#0000ff'], red:['红色','#ff0000'], darkBlue:['深蓝','#000080'], darkCyan:['深青','#008080'],
+  darkGreen:['深绿','#008000'], darkMagenta:['深紫','#800080'], darkRed:['深红','#800000'],
+  darkYellow:['深黄','#808000'], darkGray:['深灰','#808080'], lightGray:['浅灰','#c0c0c0'], black:['黑色','#000000'], white:['白色','#ffffff'],
+}
 export const maxImageBytes = 4 * 1024 * 1024

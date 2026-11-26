@@ -5,29 +5,55 @@ import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { TableKit } from '@tiptap/extension-table'
-import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FileDown, ImagePlus, Italic, List, ListOrdered, Redo2, Search, Strikethrough, Table2, Underline, Undo2 } from 'lucide-react'
-import { findText, maxImageBytes, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Bold, FileDown, ImagePlus, Italic, List, ListOrdered, Redo2, Search, Strikethrough, Subscript, Superscript, Table2, Underline, Undo2 } from 'lucide-react'
+import { findText, highlights, maxImageBytes, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import FontPicker from './FontPicker.jsx'
 import './word.css'
 
 const WordStyle = Mark.create({
   name:'wordStyle',
   addAttributes() {
     return {
-      font:{default:null,parseHTML:el=>validFont(el.style.fontFamily.replace(/["']/g,''))?el.style.fontFamily.replace(/["']/g,''):null},
-      size:{default:null,parseHTML:el=>/pt$/.test(el.style.fontSize)?parseFloat(el.style.fontSize):null},
-      color:{default:null,parseHTML:el=>validColor(el.style.color)?el.style.color:null},
+      font:{default:null,parseHTML:el=>{
+        const name=el.dataset.eastFont ?? el.style.fontFamily.replace(/["']/g,'')
+        return validFont(name) ? name : null
+      }},
+      latinFont:{default:null,parseHTML:el=>validFont(el.dataset.latinFont) ? el.dataset.latinFont : null},
+      size:{default:null,parseHTML:el=>Number(el.dataset.baseSize) || (/pt$/.test(el.style.fontSize)?parseFloat(el.style.fontSize):null)},
+      color:{default:null,parseHTML:el=>validColor(el.dataset.color)?el.dataset.color:(validColor(el.style.color)?el.style.color:null)},
+      highlight:{default:null,parseHTML:el=>Object.hasOwn(highlights,el.dataset.highlight) ? el.dataset.highlight : null},
+      script:{default:null,parseHTML:el=>({super:'superscript',sub:'subscript'})[el.style.verticalAlign] ?? null},
     }
   },
   parseHTML() { return [{tag:'span[style]'}] },
   renderHTML({ mark }) {
-    const {font,size,color}=mark.attrs
-    const styles=[]
-    if (validFont(font)) styles.push('font-family:"' + font + '"')
+    const {font,latinFont,size,color,highlight,script}=mark.attrs
+    const styles=[], attributes={}
+    const families=[...new Set([latinFont,font].filter(validFont))]
+    if (families.length) styles.push('font-family:' + families.map(f=>'"'+f+'"').join(','))
+    if (validFont(font)) attributes['data-east-font']=font
+    if (validFont(latinFont)) attributes['data-latin-font']=latinFont
     if (size>0 && size<=400) styles.push('font-size:' + size + 'pt')
-    if (validColor(color)) styles.push('color:' + color)
-    return ['span',{style:styles.join(';')},0]
+    if (validColor(color)) {styles.push('color:' + color); attributes['data-color']=color}
+    if (Object.hasOwn(highlights,highlight)) {
+      styles.push('background-color:'+highlights[highlight][1])
+      attributes['data-highlight']=highlight
+    }
+    if (script==='superscript' || script==='subscript') {
+      styles.push('vertical-align:'+(script==='superscript'?'super':'sub'))
+      styles.push('font-size:'+(size>0 ? size*0.7+'pt' : '70%'))
+      if (size>0) attributes['data-base-size']=size
+    }
+    return ['span',{...attributes,style:styles.join(';')},0]
   },
 })
+
+function paragraphLength(key, cssProperty, unit='pt') {
+  return {default:null,parseHTML:el=>{
+    const value=el.style.getPropertyValue(cssProperty)
+    return value.endsWith(unit) ? parseFloat(value) : null
+  },renderHTML:attrs=>Number.isFinite(attrs[key]) ? {style:cssProperty+':'+attrs[key]+unit} : {}}
+}
 
 const ParagraphFormat=Extension.create({
   name:'wordParagraph',
@@ -35,6 +61,11 @@ const ParagraphFormat=Extension.create({
     return [{types:['heading','paragraph'],attributes:{
       align:{default:null,parseHTML:el=>el.style.textAlign || null,renderHTML:a=>['left','right','center','justify'].includes(a.align)?{style:'text-align:' + a.align}:{}},
       lineSpacing:{default:null,parseHTML:el=>Number(el.style.lineHeight) || null,renderHTML:a=>a.lineSpacing>0?{style:'line-height:' + Number(a.lineSpacing)}:{}},
+      spaceBefore:paragraphLength('spaceBefore','margin-top'),
+      spaceAfter:paragraphLength('spaceAfter','margin-bottom'),
+      leftIndent:paragraphLength('leftIndent','margin-left'),
+      firstLinePt:paragraphLength('firstLinePt','text-indent'),
+      firstLineChars:paragraphLength('firstLineChars','text-indent','em'),
     }}]
   },
 })
@@ -52,9 +83,8 @@ const LocalImage=Image.extend({
 }).configure({allowBase64:true,inline:true})
 
 const extensions=[StarterKit.configure({blockquote:false,code:false,codeBlock:false,horizontalRule:false,link:{openOnClick:false,autolink:false}}), WordStyle,ParagraphFormat,PageBreak,LocalImage,TableKit]
-const fonts=['Microsoft YaHei','SimSun','SimHei','KaiTi','Calibri','Arial','Times New Roman']
-const sizes=[8,9,10,10.5,11,12,14,16,18,20,22,24,26,28,32,36,42,48,72]
-const fontNames={'Microsoft YaHei':'微软雅黑',SimSun:'宋体',SimHei:'黑体',KaiTi:'楷体'}
+const pointNames={42:'初号',36:'小初',26:'一号',24:'小一',22:'二号',18:'小二',16:'三号',15:'小三',14:'四号',12:'小四',10.5:'五号',9:'小五',7.5:'六号',6.5:'小六',5.5:'七号',5:'八号'}
+const sizes=[8,10,11,20,28,32,48,72,...Object.keys(pointNames).map(Number)]
 const aligns=[['left','左对齐',AlignLeft],['center','居中对齐',AlignCenter],['right','右对齐',AlignRight],['justify','两端对齐',AlignJustify]]
 const markButtons=[['bold','粗体',Bold,'toggleBold'],['italic','斜体',Italic,'toggleItalic'],['underline','下划线',Underline,'toggleUnderline'],['strike','删除线',Strikethrough,'toggleStrike']]
 
@@ -102,7 +132,7 @@ export default function Word({value, onChange, onPrintPdf, title}) {
     if (!e) return null
     const a=e.getAttributes(e.isActive('heading')?'heading':'paragraph')
     return {marks:Object.fromEntries(markButtons.map(([m])=>[m,e.isActive(m)])), run:e.getAttributes('wordStyle'),
-      heading:e.isActive('heading')?a.level:0,align:a.align || 'left',spacing:a.lineSpacing || 1.25,
+      heading:e.isActive('heading')?a.level:0,align:a.align || 'left',spacing:a.lineSpacing || 1.25,paragraph:a,
       bullet:e.isActive('bulletList'),numbered:e.isActive('orderedList'),table:e.isActive('table'),undo:e.can().undo(),redo:e.can().redo(),
       chars:e.state.doc.textContent.length}
   }})
@@ -173,12 +203,16 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         <span className="word-divider"/>
         <select aria-label="段落样式" value={format.heading} onChange={e=>Number(e.target.value)?run('setHeading',{level:Number(e.target.value)}):run('setParagraph')}>
           <option value="0">正文</option>{[1,2,3,4,5,6].map(v=><option key={v} value={v}>标题 {v}</option>)}</select>
-        <select aria-label="字体" value={activeFont} onChange={e=>applyStyle({font:e.target.value})}>
-          {[...new Set([...fonts,activeFont])].map(f=><option value={f} key={f}>{fontNames[f] || f}</option>)}</select>
+        <FontPicker label="字体" value={activeFont} onChange={font=>applyStyle({font})}/>
+        <FontPicker label="西文字体" value={format.run.latinFont || ''} defaultLabel="西文随字体" onChange={font=>applyStyle({latinFont:font || null})}/>
         <select aria-label="字号" value={activeSize} onChange={e=>applyStyle({size:Number(e.target.value)})}>
-          {[...new Set([...sizes,activeSize])].sort((a,b)=>a-b).map(s=><option key={s} value={s}>{s} pt</option>)}</select>
+          {[...new Set([...sizes,activeSize])].sort((a,b)=>a-b).map(s=><option key={s} value={s}>{pointNames[s] ? pointNames[s]+' · ' : ''}{s} pt</option>)}</select>
         {markButtons.map(([m,label,icon,cmd])=><Action compact key={m} icon={icon} label={label} pressed={format.marks[m]} onClick={()=>run(cmd)}/>)}
         <label className="word-color" title="文字颜色">A<input aria-label="文字颜色" type="color" value={format.run.color || '#37352f'} onChange={e=>applyStyle({color:e.target.value})}/></label>
+        <select aria-label="荧光标记" value={format.run.highlight || ''} onChange={e=>applyStyle({highlight:e.target.value || null})}>
+          <option value="">无荧光标记</option>{Object.entries(highlights).map(([key,[label]])=><option value={key} key={key}>{label}荧光</option>)}</select>
+        {[[Superscript,'上标','superscript'],[Subscript,'下标','subscript']].map(([icon,label,key])=><Action compact key={key} icon={icon} label={label}
+          pressed={format.run.script===key} onClick={()=>applyStyle({script:format.run.script===key ? null : key})}/>)}
         <span className="word-divider"/>
         {aligns.map(([a,label,icon])=><Action compact key={a} label={label} icon={icon} pressed={format.align===a} onClick={()=>paragraphPatch({align:a})}/>)}
         <Action compact label="项目符号" icon={List} pressed={format.bullet} onClick={()=>run('toggleBulletList')}/><Action compact label="编号列表" icon={ListOrdered} pressed={format.numbered} onClick={()=>run('toggleOrderedList')}/>
@@ -194,6 +228,15 @@ export default function Word({value, onChange, onPrintPdf, title}) {
         {format.table && <><span className="word-divider"/>{[['加行','addRowAfter'],['加列','addColumnAfter'],['删除行','deleteRow'],['删除列','deleteColumn'],['合并单元格','mergeCells'],['拆分单元格','splitCell'],['删除表格','deleteTable']].map(([label,cmd])=><Action key={cmd} label={label} disabled={!editor.can()[cmd]()} onClick={()=>run(cmd)}/>)}</>}
       </>}
       {tab==='布局' && <>
+        <label>首行 <select aria-label="首行缩进" value={format.paragraph.firstLineChars ?? (format.paragraph.firstLinePt ? 'pt' : 0)}
+          onChange={e=>paragraphPatch({firstLineChars:Number(e.target.value),firstLinePt:null})}>
+          {[...new Set([0,1,2,3,...(Number.isFinite(format.paragraph.firstLineChars)?[format.paragraph.firstLineChars]:[])])].map(n=><option key={n} value={n}>{n} 字符</option>)}
+          {format.paragraph.firstLinePt && <option value="pt">{format.paragraph.firstLinePt} pt</option>}</select></label>
+        {[['段前','spaceBefore'],['段后','spaceAfter']].map(([label,key])=>{
+          const current=format.paragraph[key]
+          return <label key={key}>{label}<select aria-label={label+'间距'} value={current ?? ''} onChange={e=>paragraphPatch({[key]:e.target.value==='' ? null : Number(e.target.value)})}>
+            <option value="">样式默认</option>{[...new Set([0,3,6,9,12,18,24,...(Number.isFinite(current)?[current]:[])])].sort((a,b)=>a-b).map(n=><option key={n} value={n}>{n} pt</option>)}</select></label>
+        })}
         <label>纸张 <select aria-label="纸张大小" value={layout.paper} onChange={e=>changeLayout({paper:e.target.value})}><option>A4</option><option>Letter</option></select></label>
         <label>方向 <select aria-label="纸张方向" value={layout.landscape?'landscape':'portrait'} onChange={e=>changeLayout({landscape:e.target.value==='landscape'})}><option value="portrait">纵向</option><option value="landscape">横向</option></select></label>
         <label>页边距 <select aria-label="页边距" value={customMargin?'custom':[12.7,25.4,38.1].find(n=>Math.abs(layout.top-n)<0.06)} onChange={e=>{const n=Number(e.target.value);changeLayout({top:n,bottom:n,left:n,right:n})}}>

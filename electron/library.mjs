@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import { constants } from 'node:fs'
 import { copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { writeAtomically } from './store.mjs'
 
-export const officeExtensions = ['docx', 'xlsx', 'pptx', 'md']
-const editable = new Set([...officeExtensions, 'csv', 'txt'])
-const binary = new Set(['docx', 'xlsx', 'pptx'])
+export const officeExtensions = ['docx', 'xlsx', 'pptx', 'md', 'txt', 'pdf']
+const editable = new Set([...officeExtensions, 'csv'])
+const binary = new Set(['docx', 'xlsx', 'pptx', 'txt'])
 const maxBytes = 32 * 1024 * 1024
 const extensionOf = path => extname(path).slice(1).toLowerCase()
 const digest = data => createHash('sha256').update(data).digest('hex')
@@ -250,12 +251,36 @@ export class FileLibrary {
     const extension = extensionOf(path)
     validateExtension(extension)
     const { bytes, modifiedAt } = await readBytes(path)
-    const content = binary.has(extension) ? bytes.toString('base64') : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-    return { ...await this.remember(path, modifiedAt, digest(bytes)), content }
+    // A PDF page stores its file binding. Its original bytes are read only by the viewer.
+    const utf8Text = extension === 'txt' && isUtf8(bytes) &&
+      (!bytes.subarray(0,1024).includes(0) || bytes.subarray(0,3).equals(Buffer.from([239,187,191])))
+    const content = extension === 'pdf' ? null : utf8Text ? bytes.toString('utf8') :
+      binary.has(extension) ? bytes.toString('base64') : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+    return { ...await this.remember(path, modifiedAt, digest(bytes)), content, ...(utf8Text ? {textEncoding:'utf-8'} : {}) }
   }
 
   async read(path) { return this.openPath(await this.pathInRoot(path)) }
   async readRecent(id) { return this.openPath(this.knownFile(id).path) }
+  async readPdf(id, revision) {
+    const { path } = this.knownFile(id)
+    this.protect(path)
+    if (extensionOf(path) !== 'pdf') throw new Error('请选择 PDF 文件。')
+    const { bytes } = await readBytes(path)
+    if (digest(bytes) !== revision) throw new Error('PDF 原件已变化。请从文件中心重新打开。')
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  }
+
+  async copyPdf(id, revision) {
+    const file = this.knownFile(id)
+    const bytes = await this.readPdf(id, revision)
+    const target = await this.platform.chooseSave(basename(file.path, extname(file.path)) + '-副本.pdf', 'pdf')
+    if (!target) return null
+    const path = join(await realpath(dirname(target)), basename(target))
+    this.protect(path)
+    if (extensionOf(path) !== 'pdf') throw new Error('请保留 .pdf 扩展名。')
+    await exclusiveWrite(path, bytes)
+    return this.remember(path, (await stat(path)).mtime.toISOString(), revision)
+  }
   async chooseOpen() {
     const path = await this.platform.chooseOpen()
     return path ? this.openPath(await realpath(path)) : null
@@ -280,8 +305,9 @@ export class FileLibrary {
     return { name: basename(path), path }
   }
 
-  async save({ id, name, extension, content, revision, asNew = false, directory }) {
+  async save({ id, name, extension, content, revision, asNew = false, directory, preserveSource = false }) {
     validateExtension(extension)
+    if (extension === 'pdf') throw new Error('PDF 阅读器保留原件，请使用另存副本。')
     validName(name)
     if (extensionOf(name) !== extension) throw new Error('文件名与保存格式不一致。')
     const bytes = encodeContent(content, extension)
@@ -296,6 +322,7 @@ export class FileLibrary {
       path = join(await realpath(dirname(path)), basename(path))
     }
     this.protect(path)
+    if (preserveSource && id && same(this.knownFile(id).path, path)) throw new Error('转换编码请另选文件名，保留原件。')
     if (extensionOf(path) !== extension) throw new Error('所选文件的扩展名与保存格式不一致。')
     const info = await infoIfPresent(path)
     if (bound && !info) throw new Error('磁盘文件已移动或删除，请另存为。')

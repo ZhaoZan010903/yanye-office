@@ -1,15 +1,28 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, Bold, ChevronDown, FileDown, FileUp, Filter, Italic, Plus, Redo2, Sigma, Table2, Undo2 } from 'lucide-react'
+import { BarChart3, Bold, ChevronDown, FileDown, FileUp, Filter, Italic, Plus, Redo2, Sigma, Strikethrough, Table2, Underline, Undo2 } from 'lucide-react'
 import {
   address, columnName, csvText, emptyWorkbook, evaluator, fillFrom, formatted, LIMITS, newSheet, parseDelimited,
-  bounds, changeCellStyle, copyRange, delimitedText, findMerge, intersects, location, mergeRange, pasteRange, rangeName, removeSheet, renameSheet, shiftGrid, unmergeRange, writeRange,
+  bounds, changeBorders, changeCellStyle, copyRange, delimitedText, findMerge, intersects, location, mergeRange, numberFormats, pasteRange, rangeName, removeSheet, renameSheet, shiftGrid, unmergeRange, writeRange,
 } from './spreadsheet.js'
 import { appendSheets, availableName, exchangeNote, readXlsx, writeXlsx } from './spreadsheet-xlsx.js'
+import FontPicker from './FontPicker.jsx'
 import './spreadsheet.css'
 
 const rowHeight = 30
 const collator = new Intl.Collator('zh-CN', { numeric: true })
-const fontList = ['微软雅黑','宋体','黑体','等线','Arial','Calibri','Times New Roman']
+function cellBorders(borders) {
+  if (!borders) return
+  const css={}
+  for (const [side,property] of [['top','borderTop'],['bottom','borderBottom'],['left','borderLeft'],['right','borderRight']]) {
+    const item=borders[side]
+    if (!item?.style) continue
+    const color=/^(?:[0-9a-f]{2})?[0-9a-f]{6}$/i.test(item.color?.argb) ? '#'+item.color.argb.slice(-6) : '#37352f'
+    const stroke=item.style==='double' ? 'double' : /dash/i.test(item.style) ? 'dashed' : item.style==='dotted' ? 'dotted' : 'solid'
+    const width=stroke==='double' || item.style==='thick' ? 3 : /medium/i.test(item.style) ? 2 : 1
+    css[property]=width+'px '+stroke+' '+color
+  }
+  return css
+}
 
 function rowAt(offsets,y) {
   let low=0, high=offsets.length-1
@@ -204,10 +217,11 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
     if (event.nativeEvent.isComposing || event.altKey) return
     if (event.ctrlKey || event.metaKey) {
       const key = event.key.toLowerCase()
-      if (!editing && ['b','i','z','y'].includes(key)) {
+      if (!editing && ['b','i','u','z','y'].includes(key)) {
         event.preventDefault()
         if (key==='b') applyStyle({bold:!style.bold})
         else if (key==='i') applyStyle({italic:!style.italic})
+        else if (key==='u') applyStyle({underline:style.underline ? null : 'single'})
         else undo(key==='y' || event.shiftKey)
       }
       return
@@ -296,10 +310,12 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
         <button disabled={book.sheets.length===1} onClick={()=>setRemoving(sheet.id)}>删除当前工作表</button>
       </SheetMenu>
       <SheetMenu label="单元格">
-        {[['常规',null],['两位小数','number'],['人民币','currency'],['百分比','percent']].map(([label,style])=>
-          <button key={label} onClick={()=>applyStyle({numberFormat:style})}>{label}</button>)}
         <button disabled={row===0} onClick={()=>updateSheet(fillFrom(sheet,row,col,'down'))}>从上方填充</button>
         <button disabled={col===0} onClick={()=>updateSheet(fillFrom(sheet,row,col,'right'))}>从左侧填充</button>
+      </SheetMenu>
+      <SheetMenu label="边框">
+        {[['全部框线','all'],['外侧框线','outline'],['清除边框','none']].map(([label,mode])=>
+          <button key={mode} onClick={()=>updateSheet(changeBorders(sheet,rangeRows,range.left,range.right,mode))}>{label}</button>)}
       </SheetMenu>
       <SheetMenu label="排序与筛选" icon={Filter}>
         <button disabled={verticalMerges} onClick={()=>updateSheet({...sheet,sort:{col,desc:false}})}>按 {columnName(col)} 列升序</button>
@@ -314,25 +330,31 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
       <SheetMenu label="导出" icon={FileDown}><button disabled={busy} onClick={()=>exchange('csv',false)}>导出 CSV</button><button disabled={busy} onClick={()=>exchange('xlsx',false)}>导出 XLSX</button></SheetMenu>
     </div>
     <div className="sheet-format" role="toolbar" aria-label="选区格式">
-      <select aria-label="选区字体" value={style.font || ''} onChange={e=>applyStyle({font:e.target.value})}>
-        <option value="">默认字体</option>{[...new Set([...fontList,...(style.font ? [style.font] : [])])].map(font=><option key={font}>{font}</option>)}
-      </select>
+      <FontPicker label="选区字体" value={style.font || ''} defaultLabel="默认字体" useLocalNames onChange={font=>applyStyle({font})}/>
       <select aria-label="选区字号" value={style.size || ''} onChange={e=>applyStyle({size:Number(e.target.value)})}>
         <option value="">默认字号</option>{[...new Set([9,10,11,12,14,16,18,20,24,28,32,...(style.size ? [style.size] : [])])].sort((a,b)=>a-b).map(size=><option key={size} value={size}>{size} pt</option>)}
       </select>
       <button aria-pressed={!!style.bold} aria-label="加粗选区" title="加粗 Ctrl+B" onClick={()=>applyStyle({bold:!style.bold})}><Bold size={15}/></button>
       <button aria-pressed={!!style.italic} aria-label="倾斜选区" title="倾斜 Ctrl+I" onClick={()=>applyStyle({italic:!style.italic})}><Italic size={15}/></button>
+      <button aria-pressed={!!style.underline} aria-label="选区下划线" title="下划线 Ctrl+U" onClick={()=>applyStyle({underline:style.underline ? null : 'single'})}><Underline size={15}/></button>
+      <button aria-pressed={!!style.strike} aria-label="选区删除线" title="删除线" onClick={()=>applyStyle({strike:!style.strike})}><Strikethrough size={15}/></button>
       <label>字色<input type="color" aria-label="选区字体颜色" value={style.color ?? '#37352f'} onChange={e=>applyStyle({color:e.target.value.toUpperCase()})}/></label>
       <label>底色<input type="color" aria-label="选区填充颜色" value={style.fill ?? '#ffffff'} onChange={e=>applyStyle({fill:e.target.value.toUpperCase()})}/></label>
       <select aria-label="选区水平对齐" value={style.align || ''} onChange={e=>applyStyle({align:e.target.value})}>
         <option value="">自动对齐</option><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option>
+      </select>
+      <select aria-label="选区垂直对齐" value={style.vertical || ''} onChange={e=>applyStyle({vertical:e.target.value})}>
+        <option value="">垂直默认</option><option value="top">顶端对齐</option><option value="middle">垂直居中</option><option value="bottom">底端对齐</option>
+      </select>
+      <select aria-label="选区数字格式" value={sheet.formats?.[selected] || ''} onChange={e=>applyStyle({numberFormat:e.target.value})}>
+        <option value="">常规</option>{Object.entries(numberFormats).map(([key,[label]])=><option key={key} value={key}>{label}</option>)}
       </select>
       <button disabled={range.top===range.bottom && range.left===range.right} onClick={()=>tryAction(()=>{
         if (range.bottom>range.top && (sort || filter)) throw new Error('请还原行序并清除筛选，再合并多行。')
         updateSheet(mergeRange(sheet,range)); go(range.top,range.left)
       })}>合并单元格</button>
       <button disabled={!sheet.merges?.some(box=>intersects(box,range))} onClick={()=>updateSheet(unmergeRange(sheet,range))}>取消合并</button>
-      <button onClick={()=>applyStyle({bold:false,italic:false,color:null,fill:null,align:null,font:null,size:null,numberFormat:null})}>清除格式</button>
+      <button onClick={()=>applyStyle({bold:false,italic:false,underline:null,strike:false,color:null,fill:null,align:null,vertical:null,borders:null,font:null,size:null,numberFormat:null})}>清除格式</button>
     </div>
     {widthEditor && <form className="sheet-filter" onSubmit={e=>{
       e.preventDefault()
@@ -404,7 +426,9 @@ export default function Spreadsheet({ value, onChange, onImport, onExport }) {
               const cellStyle=sheet.styles?.[ref] ?? {}
               const result = display(sheet,ref)
               return <td key={c} data-address={ref} aria-label={ref} rowSpan={merge?.height} colSpan={merge ? merge.box.right-merge.box.left+1 : undefined}
-                style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:cellStyle.fill,textAlign:cellStyle.align}}
+                style={{fontWeight:cellStyle.bold?700:undefined,fontStyle:cellStyle.italic?'italic':undefined,fontFamily:cellStyle.font,fontSize:cellStyle.size ? cellStyle.size+'pt':undefined,color:cellStyle.color,backgroundColor:cellStyle.fill,textAlign:cellStyle.align,
+                  verticalAlign:cellStyle.vertical || 'bottom',textDecorationLine:[cellStyle.underline && 'underline',cellStyle.strike && 'line-through'].filter(Boolean).join(' ') || undefined,
+                  textDecorationStyle:String(cellStyle.underline).startsWith('double') ? 'double' : undefined,...cellBorders(cellStyle.borders)}}
                 className={(active?'sheet-selected ':'')+(highlighted.has(rr) && c>=range.left && c<=range.right ? 'sheet-highlight ' : '')+(typeof result==='number'?'sheet-number':'')}
                 onPointerDown={e=>{if(e.button!==0 || e.target.tagName==='INPUT') return; e.preventDefault(); drag.current=true; go(rr,cc,true,e.shiftKey)}}
                 onPointerEnter={e=>{if(drag.current && e.buttons===1) go(rr,cc,true,true)}}

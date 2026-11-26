@@ -49,6 +49,8 @@ try {
   nativeWord([
     "$doc = $word.Documents.OpenNoRepairDialog((Join-Path $env:YANYE_TEST_DIR 'seed.docx'), $false, $true, $false)",
     "if ($doc.Tables.Count -ne 1 -or $doc.ComputeStatistics(2) -ne 2 -or $doc.InlineShapes.Count -ne 1) {throw 'Word failed to read editable content'}",
+    "$heading = $doc.Paragraphs.Item(1).Range",
+    "$heading.Font.NameAscii = 'Cambria'; $heading.Font.NameFarEast = 'KaiTi'; $heading.HighlightColorIndex = 4; $heading.ParagraphFormat.SpaceAfter = 18",
     "$doc.SaveAs2((Join-Path $env:YANYE_TEST_DIR 'from-word.docx'),16)",
   ])
   app=await _electron.launch({executablePath,args:process.argv[2]?[]:[project],env:{...process.env,YANYE_PROFILE:profile}})
@@ -66,6 +68,11 @@ try {
   const body=page.getByRole('textbox',{name:'Word 文档正文'})
   await body.waitFor()
   await body.getByRole('heading',{name:'Local Office'}).waitFor()
+  const heading=body.getByRole('heading',{name:'Local Office'})
+  const importedRun=heading.locator('[data-latin-font="Cambria"]')
+  await importedRun.first().waitFor()
+  assert.equal(await importedRun.first().getAttribute('data-highlight'),'green')
+  assert.equal(await heading.evaluate(el=>el.style.marginBottom),'18pt')
   assert.equal(await body.locator('table').count(),1)
   assert.equal(await body.locator('img[src^="data:image/"]').count(),1)
   assert.equal(await body.locator('[data-word-page-break]').count(),1)
@@ -74,7 +81,19 @@ try {
   await page.getByLabel('替换文字').fill('Approved budget')
   await button('全部替换').click()
   await body.getByText('Approved budget',{exact:true}).waitFor()
+  await page.getByLabel('查找文字').fill('Approved budget')
+  await button('下一处').click()
+  await page.getByLabel('字体',{exact:true}).selectOption('FangSong')
+  await page.getByLabel('西文字体',{exact:true}).selectOption('__custom')
+  await page.getByRole('textbox',{name:'西文字体名称'}).fill('Arial')
+  await button('应用字体').click()
+  await page.getByLabel('字号',{exact:true}).selectOption('15')
+  await page.getByLabel('荧光标记').selectOption('yellow')
+  await button('上标').click()
   await button('布局').click()
+  await page.getByLabel('首行缩进').selectOption('2')
+  await page.getByLabel('段前间距').selectOption('6')
+  await page.getByLabel('段后间距').selectOption('12')
   await page.getByLabel('纸张大小').selectOption('Letter')
   await page.getByLabel('页边距',{exact:true}).selectOption('12.7')
   await button('另存为').click()
@@ -88,6 +107,9 @@ try {
     "$doc = $word.Documents.OpenNoRepairDialog((Join-Path $env:YANYE_TEST_DIR 'from-yanye.docx'), $false, $true, $false)",
     "if (!$doc.Content.Text.Contains('Approved budget') -or $doc.Tables.Count -ne 1 -or $doc.InlineShapes.Count -ne 1 -or $doc.ComputeStatistics(2) -ne 2) {throw 'Native Word round trip failed'}",
     "if ([Math]::Abs($doc.PageSetup.LeftMargin - 36) -gt 1 -or [Math]::Abs($doc.PageSetup.PageWidth - 612) -gt 1) {throw 'Paper settings changed'}",
+    "$formatted = $doc.Content.Duplicate; if (!$formatted.Find.Execute('Approved budget')) {throw 'Missing formatted text'}",
+    "if ($formatted.Font.NameAscii -ne 'Arial' -or $formatted.Font.NameFarEast -notin @('仿宋','FangSong') -or $formatted.Font.Size -ne 15 -or !$formatted.Font.Superscript -or $formatted.HighlightColorIndex -ne 7) {throw ('Character format changed: '+$formatted.Font.NameAscii+' / '+$formatted.Font.NameFarEast+' / '+$formatted.Font.Size+' / '+$formatted.Font.Superscript+' / '+$formatted.HighlightColorIndex)}",
+    "if ($formatted.ParagraphFormat.SpaceBefore -ne 6 -or $formatted.ParagraphFormat.SpaceAfter -ne 12 -or [Math]::Abs($formatted.ParagraphFormat.CharacterUnitFirstLineIndent-2) -gt .05) {throw 'Paragraph formatting changed'}",
     "Write-Output ('Word ' + $word.Version + ', pages ' + $doc.ComputeStatistics(2) + ', tables ' + $doc.Tables.Count + ', images ' + $doc.InlineShapes.Count)",
   ])
   console.log(actual + '. DOCX round trip and two-page Letter PDF passed.')

@@ -1,16 +1,17 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH, visiblePages } from '../shared/workspace.mjs'
-import { WorkspaceStore, writeAtomically } from './store.mjs'
+import { MAX_MARKDOWN_LENGTH, MAX_TITLE_LENGTH } from '../shared/workspace.mjs'
+import { settleWorkspaceForClose, writeAtomically } from './store.mjs'
+import { WorkspaceProcess } from './workspace-process.mjs'
 import { FileLibrary, officeExtensions } from './library.mjs'
 
 const directory = fileURLToPath(new URL('../', import.meta.url))
 const assets = join(directory, 'dist')
 const startUrl = 'yanye://app/index.html'
-const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+const csp = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 app.setName('砚页')
 app.setAppUserModelId('com.yanye.desktop')
@@ -24,7 +25,7 @@ app.setPath('userData', userData)
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'yanye', privileges: { standard: true, secure: true, supportFetchAPI: true } }])
 
-const store = new WorkspaceStore(join(app.getPath('userData'), 'workspace.json'))
+const store = new WorkspaceProcess(userData)
 let window
 let library
 let saveTimer
@@ -39,6 +40,7 @@ function notifySave(state) {
 
 async function flush() {
   clearTimeout(saveTimer)
+  saveTimer = undefined
   const revision = await store.flush()
   notifySave({ state: 'saved', revision })
   return revision
@@ -49,28 +51,23 @@ function saveError(error) {
   notifySave({ state: 'error', message })
 }
 
-async function finishClose(snapshot) {
+async function finishClose() {
   if (!closing || closeInProgress) return
   closeInProgress = true
   clearTimeout(closeTimer)
 
   try {
-    if (snapshot) store.stage(snapshot)
-    await library.idle()
-    await flush()
-    const workspace = await store.load()
-    const dirty = visiblePages(workspace.pages).filter(page => page.disk?.dirty && !page.disk.closeAcknowledged)
+    const dirty = await settleWorkspaceForClose(library, store, flush)
     if (dirty.length) {
       const result = await dialog.showMessageBox(window, {
         type: 'question',
         message: '还有 ' + dirty.length + ' 个办公文件未写入磁盘',
-        detail: '工作区已保留本机草稿。返回编辑可以将更改写回文件：' + dirty.slice(0, 4).map(p => p.disk.name).join('、'),
+        detail: '工作区已保留本机草稿。返回编辑可以将更改写回文件：' + dirty.slice(0, 4).join('、'),
         buttons: ['返回编辑', '保留本机草稿并关闭'],
         defaultId: 0, cancelId: 0,
       })
       if (result.response !== 1) return
-      await library.idle()
-      await flush()
+      await settleWorkspaceForClose(library, store, flush)
     }
     closeAllowed = true
     window.close()
@@ -137,28 +134,24 @@ function registerHandlers() {
     },
     trash: path => shell.trashItem(path),
   })
-  for (const method of ['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup']) {
+  for (const method of ['state','chooseRoot','list','mkdir','rename','move','trash','read','chooseOpen','recent','describe','readRecent','save','create','exportBackup','readPdf','copyPdf']) {
     handle('library:' + method, (...args) => library.invoke(method, ...args))
   }
-  handle('workspace:load', async () => ({ workspace: await store.load(), directory: dirname(store.filename) }))
+  handle('workspace:load', async () => ({ workspace: await store.load(), directory: userData }))
 
-  ipcMain.on('workspace:stage', (event, snapshot) => {
+  ipcMain.on('workspace:stage', (event, delta) => {
     try {
       assertTrusted(event)
-      if (!store.stage(snapshot)) return
-      clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => { flush().catch(saveError) }, 360)
+      store.stage(delta)
+      saveTimer ??= setTimeout(() => { flush().catch(saveError) }, 180)
     } catch (error) {
       saveError(error)
     }
   })
 
-  handle('workspace:flush', async snapshot => {
-    if (snapshot) store.stage(snapshot)
-    return flush()
-  })
+  handle('workspace:flush', flush)
   handle('workspace:finish-close', finishClose)
-  handle('workspace:open-folder', () => shell.openPath(dirname(store.filename)))
+  handle('workspace:open-folder', () => shell.openPath(userData))
 
   handle('office:print-pdf', async name => {
     if (typeof name !== 'string') throw new Error('文档名称无效。')
@@ -329,3 +322,4 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('window-all-closed', () => app.quit())
+app.on('will-quit', () => store.dispose())

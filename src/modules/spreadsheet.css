@@ -66,4 +66,5 @@
 .sheet-scroll td input { user-select:text; }
 .sheet-scroll tbody :is(td,th) { height:var(--sheet-row-height,30px); }
 .sheet-scroll tbody th, .sheet-scroll td span { line-height:calc(var(--sheet-row-height,30px) - 1px); max-height:calc(var(--sheet-row-height,30px) - 1px); overflow:hidden; }
+.sheet-scroll td span { line-height:1.35; }
 .sheet-scroll td.sheet-highlight:not(.sheet-selected)::after { content:''; position:absolute; inset:0; background:rgba(49,118,138,.11); pointer-events:none; }

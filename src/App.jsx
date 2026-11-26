@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownToLine, ChevronRight, CircleAlert, FolderOpen, FolderTree, LayoutList, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Save, Star, Trash2, X } from 'lucide-react'
 import {
   addPage, ancestors, canMoveTo, indexPages, makePage, MAX_MARKDOWN_LENGTH, movePage, openPage, pageTitle,
   restorePage, setCollapsed, trashPage, updatePage, visiblePages, MAX_WORKSPACE_BYTES, officeKinds, workspaceBytes,
 } from '../shared/workspace.mjs'
-import { DocumentEditor } from './editor.jsx'
+import { workspaceDelta } from '../shared/workspace-delta.mjs'
+import { TextEncodingDialog } from './text-encoding-dialog.jsx'
 import { OfficePage } from './office-page.jsx'
 import { FileCenter } from './FileCenter.jsx'
 import { fileTitle, pageExtension } from './office-files.js'
@@ -12,6 +13,8 @@ import { useDiskFiles } from './use-disk-files.js'
 import { Breadcrumbs, Dialog, EmptyWorkspace, IconButton, PageIcon, SearchDialog, Sidebar, TrashDialog } from './workspace-ui.jsx'
 
 const desktop = window.yanye
+const DocumentEditor = lazy(() => import('./editor.jsx').then(module => ({ default: module.DocumentEditor })))
+const workspaceKinds = { note: '电子文档', spreadsheet: '电子表格', presentation: '演示文稿', database: '多维表格', canvas: '流程图与白板' }
 
 function errorText(error) {
   const message = error instanceof Error ? error.message : String(error)
@@ -63,7 +66,7 @@ export function App() {
       if (result.state === 'error' || result.revision >= (latest.current?.revision ?? 0)) setSaveState(result)
     })
     const stopClosing = desktop.onCloseRequest(() => {
-      desktop.finishClose(latest.current).catch(() => {})
+      desktop.finishClose().catch(error => setSaveState({ state: 'error', message: errorText(error) }))
     })
     return () => {
       stopSaving()
@@ -78,6 +81,7 @@ export function App() {
     const next = transform(current)
     if (next === current) return true
     const snapshot = { ...next, revision: current.revision + 1 }
+    const delta = workspaceDelta(current, snapshot)
     if (workspaceBytes(snapshot) > MAX_WORKSPACE_BYTES) {
       notify('工作区已达到 24 MiB 上限，此次改动未写入。可以缩小图片或拆分导入内容。')
       return false
@@ -85,7 +89,7 @@ export function App() {
     latest.current = snapshot
     setWorkspace(snapshot)
     setSaveState({ state: 'pending' })
-    desktop.stage(snapshot)
+    desktop.stage(delta)
     return true
   }, [notify])
 
@@ -117,7 +121,7 @@ export function App() {
   const save = useCallback(async () => {
     if (!latest.current) return
     try {
-      await desktop.save(latest.current)
+      await desktop.save()
     } catch (error) {
       setSaveState({ state: 'error', message: errorText(error) })
     }
@@ -139,7 +143,7 @@ export function App() {
       if (key === 'o') files.openFile(() => desktop.library.chooseOpen()).catch(handleFileError)
       if (key === 's' && screen === 'editor') {
         const target = latest.current.pages.find(p=>p.id===latest.current.activeId)
-        if (target && pageExtension(target) && (target.disk || officeKinds[target.kind] || event.shiftKey)) {
+        if (target && pageExtension(target) && (target.disk || event.shiftKey)) {
           files.saveFile(target.id,event.shiftKey).catch(handleFileError)
         } else void save()
       }
@@ -266,8 +270,8 @@ export function App() {
         {screen === 'files' ? <span className="breadcrumb-empty">本机 / 文件中心</span> : <>
           <IconButton label="返回文件中心" icon={FolderOpen} onClick={home}/><Breadcrumbs page={page} byId={byId} onOpen={open} />
           {pageExtension(page) && <div className="disk-actions">
-            <button disabled={files.busy} onClick={() => files.saveFile(page.id).catch(handleFileError)} title="保存到磁盘 (Ctrl+S)"><Save size={14}/>保存文件</button>
-            <button disabled={files.busy} onClick={() => files.saveFile(page.id,true).catch(handleFileError)} title="Ctrl+Shift+S">另存为</button>
+            {page.disk && page.kind !== 'pdf' && <button disabled={files.busy} onClick={() => files.saveFile(page.id).catch(handleFileError)} title="保存到磁盘 (Ctrl+S)"><Save size={14}/>保存文件</button>}
+            <button disabled={files.busy} onClick={() => files.saveFile(page.id,true).catch(handleFileError)} title="Ctrl+Shift+S">{page.disk ? '另存为' : '导出文件'}</button>
           </div>}</>}
         <div className="window-drag-spacer" />
       </header>
@@ -280,12 +284,12 @@ export function App() {
       {screen === 'files' ? <FileCenter files={files} onMutate={syncFileNames} chooseNew={chooseNewFile} onChosen={()=>setChooseNewFile(false)}/> : page && officeKinds[page.kind] ? <OfficePage key={page.id} page={page} pages={pages}
         focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={diskState} onSave={save}
         onEdit={fields => edit(page.id, fields)} onMenu={() => pageMenu(page.id)} onFavorite={() => favorite(page)} />
-        : page ? <DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}
+        : page ? <Suspense fallback={<p role="status">正在打开电子文档…</p>}><DocumentEditor key={page.id} page={page} children={pages.filter(child => child.parentId === page.id)}
         focusTitle={focusTitle?.id === page.id ? focusTitle : null} saveState={diskState} onSave={save}
         contextOpen={contextOpen} onContextToggle={() => setContextOpen(value => !value)}
         onChange={fields => edit(page.id, fields)} onOpenPage={open} onCreateChild={() => create(page.id)}
         onFavorite={() => favorite(page)} onExport={() => exportMarkdown(page.id)} onMenu={() => pageMenu(page.id)}
-        onExternalLink={href => desktop.openLink(href).catch(error => notify(errorText(error)))} />
+        onExternalLink={href => desktop.openLink(href).catch(error => notify(errorText(error)))} /></Suspense>
         : <EmptyWorkspace onCreate={() => actions.create()} />}
     </main>
 
@@ -301,8 +305,9 @@ export function App() {
         <button className="button" onClick={() => {closeModal();files.saveFile(modal.id,true).catch(handleFileError)}}>另存副本</button>
         <button className="button primary" onClick={() => {closeModal();files.saveFile(modal.id,false,true).catch(handleFileError)}}>备份并保存原文件</button></div>
     </Dialog>}
-    {modal?.type === 'new' && <Dialog title="新建本地页面" onClose={closeModal}>
-      <div className="action-list">{Object.entries({note: 'Markdown 文档', ...officeKinds}).map(([kind, label]) =>
+    <TextEncodingDialog request={files.encodingRequest}/>
+    {modal?.type === 'new' && <Dialog title="新建工作区文稿" onClose={closeModal}>
+      <div className="action-list">{Object.entries(workspaceKinds).map(([kind, label]) =>
         <button type="button" key={kind} onClick={() => create(modal.parentId, kind)}><PageIcon page={{ kind }} />{label}</button>)}</div>
     </Dialog>}
     {modal?.type === 'search' && <SearchDialog pages={pages} byId={byId} onSelect={open} onClose={closeModal} />}

@@ -83,7 +83,7 @@ export function Sidebar({ pages, workspace, activeId, directory, actions }) {
       </section>}
       <section className="nav-section pages-section" aria-label="页面">
         <div className="nav-heading-row">
-          <h2 className="nav-heading">页面</h2>
+          <h2 className="nav-heading">工作区文稿</h2>
           <IconButton className="sidebar-add" icon={Plus} size={16} label="新建页面" title="新建页面（Ctrl N）" onClick={() => actions.create()} />
         </div>
         {pages.length ? renderPages() : <button type="button" className="empty-tree" onClick={() => actions.create()}>创建第一页</button>}

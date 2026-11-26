@@ -23,7 +23,7 @@ function SaveState({ state, onSave }) {
   const pending = state.state === 'pending'
   const Icon = pending ? LoaderCircle : Check
   return <span className="save-state" aria-live="polite">
-    <Icon size={14} className={pending ? 'spinning' : ''} />{pending ? '正在保存草稿' : state.label || '已保存'}
+    <Icon size={14} className={pending ? 'spinning' : ''} />{pending ? '正在保存草稿' : state.label || '已保存到本机'}
   </span>
 }
 
@@ -133,16 +133,17 @@ export function DocumentEditor({
   page, children: childPages, focusTitle, saveState, onSave, contextOpen, onContextToggle, onChange, onOpenPage,
   onCreateChild, onFavorite, onExport, onMenu, onExternalLink,
 }) {
-  const sourceInfo = useMemo(() => describeSource(page.markdown), [page.markdown])
-  const [mode, setMode] = useState(() => sourceInfo.sourceOnly ? 'source' : 'rich')
+  const [initialSource] = useState(() => describeSource(page.markdown))
+  const [mode, setMode] = useState(() => initialSource.sourceOnly ? 'source' : 'rich')
+  const sourceInfo = useMemo(() => mode === 'source' ? describeSource(page.markdown) : null, [mode, page.markdown])
   const [selectedHeading, setSelectedHeading] = useState(null)
   const titleInput = useRef(null)
   const sourceInput = useRef(null)
-  const lastRichText = useRef(sourceInfo.sourceOnly ? '' : page.markdown)
+  const lastRichText = useRef(initialSource.sourceOnly ? '' : page.markdown)
   const handlers = useRef({ onCreateChild, onExternalLink, onChange })
   handlers.current = { onCreateChild, onExternalLink, onChange }
 
-  const editor = useEditor({
+  const options = useMemo(() => ({
     extensions: [
       StarterKit.configure({ underline: false, link: { openOnClick: false, HTMLAttributes: { title: 'Ctrl + 单击打开链接' } } }),
       TaskList,
@@ -170,15 +171,28 @@ export function DocumentEditor({
       if (handlers.current.onChange({ markdown })) lastRichText.current = markdown
       else editor.commands.setContent(lastRichText.current, { contentType: 'markdown', emitUpdate: false })
     },
-  }, [])
+  }), [])
+  const editor = useEditor(options, [])
 
   const format = useEditorState({ editor, selector: ({ editor }) => editor ? ({
     undo: editor.can().undo(), redo: editor.can().redo(), bold: editor.isActive('bold'), italic: editor.isActive('italic'),
     heading: editor.isActive('heading', { level: 2 }), list: editor.isActive('bulletList'), table: editor.isActive('table'),
   }) : null })
 
-  const info = useMemo(() => mode === 'source' || !editor ? sourceInfo : describeDocument(editor), [editor, mode, sourceInfo])
+  const richDoc = editor?.state.doc
+  const info = useMemo(() => sourceInfo || (richDoc ? describeDocument(editor) : initialSource), [richDoc, editor, initialSource, sourceInfo])
   const currentHeading = info.headings.some(heading => heading.position === selectedHeading) ? selectedHeading : info.headings[0]?.position
+
+  // Opening an externally changed Markdown file can reuse this editor instance.
+  useEffect(() => {
+    if (!editor || mode !== 'rich' || lastRichText.current === page.markdown) return
+    if (describeSource(page.markdown).sourceOnly) {
+      setMode('source')
+      return
+    }
+    lastRichText.current = page.markdown
+    editor.commands.setContent(page.markdown, {contentType:'markdown', emitUpdate:false})
+  }, [editor, mode, page.markdown])
 
   useEffect(() => {
     if (!focusTitle) return
@@ -190,7 +204,7 @@ export function DocumentEditor({
   }, [focusTitle])
 
   function switchMode(next) {
-    if (next === mode || (next === 'rich' && (sourceInfo.sourceOnly || !editor))) return
+    if (next === mode || (next === 'rich' && (sourceInfo?.sourceOnly || !editor))) return
     if (next === 'rich' && lastRichText.current !== page.markdown) {
       editor.commands.setContent(page.markdown, { contentType: 'markdown', emitUpdate: false })
       lastRichText.current = page.markdown
@@ -214,7 +228,7 @@ export function DocumentEditor({
   }
 
   return <section className="document" aria-label="写作区">
-    <Toolbar editor={editor} format={format} sourceMode={mode === 'source'} setMode={switchMode} sourceOnly={sourceInfo.sourceOnly}
+    <Toolbar editor={editor} format={format} sourceMode={mode === 'source'} setMode={switchMode} sourceOnly={sourceInfo?.sourceOnly}
       contextOpen={contextOpen} onContextToggle={onContextToggle} page={page} onFavorite={onFavorite}
       onExport={onExport} onMenu={onMenu} onCreateChild={onCreateChild} />
     <div className={`editor-layout ${contextOpen ? 'with-context' : ''}`}>
@@ -244,7 +258,7 @@ export function DocumentEditor({
     <footer className="status-bar">
       <SaveState state={saveState} onSave={onSave} />
       <div className="status-details"><span>{info.characters.toLocaleString('zh-CN')} 字符</span><span className="status-separator" />
-        <span>{mode === 'source' ? 'Markdown 源码' : 'Markdown'}</span></div>
+        <span>{mode === 'source' ? 'Markdown 源码' : page.disk ? 'Markdown' : '电子文档 · 仅本机'}</span></div>
     </footer>
   </section>
 }

@@ -7,3 +7,6 @@
 .office-editor > p[role=status] { padding:24px; color:var(--muted); }
 .office-recovery { max-width: 708px; padding: 24px; }
 .office-recovery h2 { font-size: 20px; }
+.office-custom-font { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.office-custom-font input { width:126px; }
+.office-custom-font small { color:#68665f; }

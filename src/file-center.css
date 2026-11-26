@@ -6,7 +6,7 @@
 .files-intro { justify-content:space-between; gap:12px; }
 .files-intro h1 { margin:0; font-size:32px; line-height:1.2; font-weight:600; letter-spacing:-.01em; }
 .files-intro .button { display:inline-flex; align-items:center; gap:8px; }
-.files-create { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:28px 0 48px; }
+.files-create { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin:28px 0 48px; }
 .files-create-tile { min-width:0; gap:10px; padding:14px 12px; border:1px solid var(--color-hairline); border-radius:4px; background:white; text-align:left; }
 .files-create-tile:hover,.files-action:hover,.files-tabs button:hover,.files-path button:hover,.files-row:hover,.files-folders button:hover,.disk-actions button:hover,.disk-tab button:hover { background:var(--color-hover-grey); }
 .files-type-icon { background:var(--color-paper); border-radius:4px; flex:0 0 37px; height:43px; justify-content:center; color:var(--type-ink,var(--color-ink)); }

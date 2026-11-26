@@ -67,6 +67,23 @@ export function changeCellStyle(sheet, rows, left, right, patch) {
   return { ...sheet, styles, formats }
 }
 
+export function changeBorders(sheet, rows, left, right, mode) {
+  const styles={...sheet.styles}
+  for (const row of rows) for (let col=left; col<=right; col++) {
+    const ref=address(row,col), style={...styles[ref]}, borders={...style.borders}
+    if (mode==='none') delete style.borders
+    else {
+      for (const [side,edge] of [['top',row===rows[0]],['bottom',row===rows.at(-1)],['left',col===left],['right',col===right]]) {
+        if (mode==='all' || edge) borders[side]={style:'thin',color:{argb:'FF37352F'}}
+      }
+      if (Object.keys(borders).length) style.borders=borders
+    }
+    if (Object.keys(style).length) styles[ref]=style
+    else delete styles[ref]
+  }
+  return {...sheet,styles}
+}
+
 export function emptyWorkbook() {
   return { sheets: [newSheet('工作表1', 'sheet-1')], active: 'sheet-1' }
 }
@@ -171,13 +188,28 @@ export function fillFrom(sheet, row, col, direction) {
   return pasteRange(sheet,row,col,copyRange(sheet,[row-dr],col-dc,col-dc))
 }
 
-const formats = {
-  number: new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}),
-  currency: new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY'}),
-  percent: new Intl.NumberFormat('zh-CN',{style:'percent',maximumFractionDigits:2}),
+export const numberFormats = {
+  number:['两位小数','0.00'], integer:['整数','0'], grouped:['千分位整数','#,##0'], groupedDecimal:['千分位小数','#,##0.00'],
+  currency:['人民币','"¥"#,##0.00'], percent:['百分比','0.00%'], percentWhole:['整数百分比','0%'], scientific:['科学记数','0.00E+00'],
 }
-export const formatted = (value,style) => typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') :
-  typeof value === 'number' && Object.hasOwn(formats,style) ? formats[style].format(value) : value
+const formats = {
+  number: new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}),
+  integer: new Intl.NumberFormat('zh-CN',{maximumFractionDigits:0,useGrouping:false}),
+  grouped: new Intl.NumberFormat('zh-CN',{maximumFractionDigits:0}),
+  groupedDecimal: new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}),
+  currency: new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY'}),
+  percent: new Intl.NumberFormat('zh-CN',{style:'percent',minimumFractionDigits:2,maximumFractionDigits:2,useGrouping:false}),
+  percentWhole: new Intl.NumberFormat('zh-CN',{style:'percent',maximumFractionDigits:0,useGrouping:false}),
+}
+export function formatted(value,style) {
+  if (typeof value==='boolean') return value ? 'TRUE' : 'FALSE'
+  if (typeof value!=='number') return value
+  if (style==='scientific') {
+    const [mantissa,exponent]=value.toExponential(2).split('e')
+    return mantissa+'E'+exponent[0]+exponent.slice(1).padStart(2,'0')
+  }
+  return Object.hasOwn(formats,style) ? formats[style].format(value) : value
+}
 
 export function shiftGrid(book, id, axis, index, delta) {
   const target = book.sheets.find(sheet => sheet.id === id)

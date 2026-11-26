@@ -1,4 +1,4 @@
-import { paperDimensions, validColor, validFont, wordValue } from './word-model.js'
+import { highlights, paperDimensions, validColor, validFont, wordValue } from './word-model.js'
 export { readDocx } from './word-import.js'
 
 const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -30,19 +30,24 @@ function numbering(lists) {
 }
 
 function runProperties(marks) {
+  const types = new Set(marks?.map(mark => mark.type))
+  const style = marks?.find(mark => mark.type === 'wordStyle')?.attrs ?? {}
+  const {font, latinFont, size, color, highlight, script} = style
   let props = ''
-  for (const mark of marks ?? []) {
-    if (mark.type === 'bold') props += '<w:b/><w:bCs/>'
-    if (mark.type === 'italic') props += '<w:i/><w:iCs/>'
-    if (mark.type === 'underline') props += tag('u','single')
-    if (mark.type === 'strike') props += '<w:strike/>'
-    if (mark.type === 'wordStyle') {
-      const {font, size, color} = mark.attrs
-      if (validFont(font)) props += '<w:rFonts w:ascii="' + escape(font) + '" w:hAnsi="' + escape(font) + '" w:eastAsia="' + escape(font) + '"/>'
-      if (validColor(color)) props += tag('color',color.slice(1))
-      if (Number(size)>0) props += tag('sz',Math.round(Number(size)*2))
-    }
+  const western = validFont(latinFont) ? latinFont : font
+  if (validFont(font) || validFont(western)) {
+    const east = validFont(font) ? ' w:eastAsia="' + escape(font) + '"' : ''
+    const latin = validFont(western) ? ' w:ascii="' + escape(western) + '" w:hAnsi="' + escape(western) + '"' : ''
+    props += '<w:rFonts' + latin + east + '/>'
   }
+  if (types.has('bold')) props += '<w:b/><w:bCs/>'
+  if (types.has('italic')) props += '<w:i/><w:iCs/>'
+  if (types.has('strike')) props += '<w:strike/>'
+  if (validColor(color)) props += tag('color',color.slice(1))
+  if (Number(size)>0) props += tag('sz',Math.round(Number(size)*2))
+  if (Object.hasOwn(highlights,highlight)) props += tag('highlight',highlight)
+  if (types.has('underline')) props += tag('u','single')
+  if (script === 'superscript' || script === 'subscript') props += tag('vertAlign',script)
   return props ? '<w:rPr>' + props + '</w:rPr>' : ''
 }
 
@@ -78,7 +83,16 @@ export async function writeDocx(value) {
     const a = n.attrs ?? {}
     let props = n.type === 'heading' ? tag('pStyle','Heading' + a.level) : ''
     if (num) props += '<w:numPr>' + tag('ilvl',num.level) + tag('numId',num.id) + '</w:numPr>'
-    if (a.lineSpacing) props += '<w:spacing w:line="' + Math.round(Number(a.lineSpacing)*240) + '" w:lineRule="auto"/>'
+    const spacing = []
+    if (Number.isFinite(a.spaceBefore)) spacing.push('w:before="' + Math.round(a.spaceBefore*20) + '"')
+    if (Number.isFinite(a.spaceAfter)) spacing.push('w:after="' + Math.round(a.spaceAfter*20) + '"')
+    if (a.lineSpacing) spacing.push('w:line="' + Math.round(Number(a.lineSpacing)*240) + '" w:lineRule="auto"')
+    if (spacing.length) props += '<w:spacing ' + spacing.join(' ') + '/>'
+    const indent = []
+    if (Number.isFinite(a.leftIndent)) indent.push('w:left="' + Math.round(a.leftIndent*20) + '"')
+    if (Number.isFinite(a.firstLineChars)) indent.push('w:' + (a.firstLineChars < 0 ? 'hangingChars' : 'firstLineChars') + '="' + Math.round(Math.abs(a.firstLineChars)*100) + '"')
+    else if (Number.isFinite(a.firstLinePt)) indent.push('w:' + (a.firstLinePt < 0 ? 'hanging' : 'firstLine') + '="' + Math.round(Math.abs(a.firstLinePt)*20) + '"')
+    if (indent.length) props += '<w:ind ' + indent.join(' ') + '/>'
     if (a.align) props += tag('jc',a.align === 'justify' ? 'both' : a.align)
     return '<w:p><w:pPr>' + props + '</w:pPr>' + children(n).map(inline).join('') + '</w:p>'
   }

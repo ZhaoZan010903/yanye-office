@@ -4,7 +4,8 @@ import { fileTypes } from './office-files.js'
 import { Dialog, IconButton } from './workspace-ui.jsx'
 import './file-center.css'
 
-const icons = { docx: FileText, xlsx: Sheet, pptx: Presentation, md: FileText }
+const icons = { docx:FileText, xlsx:Sheet, pptx:Presentation, md:FileText, txt:FileText, pdf:File }
+const newFileTypes = Object.entries(fileTypes).filter(([, type]) => !type.openOnly)
 const parentOf = path => path.split('/').slice(0, -1).join('/')
 const basename = path => path?.split(/[\\/]/).filter(Boolean).at(-1) || path
 const messageOf = e => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
@@ -94,7 +95,7 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
   }
   function openRow(row) {
     if (row.isDirectory) { navigate(row.path); return }
-    if (!fileTypes[row.extension]) { setMessage('可以管理此文件。可直接编辑的格式为 DOCX、XLSX、PPTX 和 Markdown。'); return }
+    if (!fileTypes[row.extension]) { setMessage('此格式可在文件中心管理。支持打开 DOCX、XLSX、PPTX、PDF、Markdown 和 TXT。'); return }
     files.openFile(() => section === 'recent' ? api.readRecent(row.id) : api.read(row.path)).catch(e => setMessage(messageOf(e)))
   }
   async function mutated() {
@@ -129,7 +130,7 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
     <div className="files-content">
       <header className="files-intro"><h1>文件中心</h1><button className="button primary" disabled={files.busy}
         onClick={() => files.openFile(() => api.chooseOpen()).catch(e => setMessage(messageOf(e)))}><FolderOpen size={16}/>打开本地文件</button></header>
-      <div className="files-create" aria-label="新建办公文件">{Object.entries(fileTypes).map(([ext,type]) => {
+      <div className="files-create" aria-label="新建办公文件">{newFileTypes.map(([ext,type]) => {
         const Icon = icons[ext]
         return <button key={ext} className={'files-create-tile type-'+ext} aria-label={'新建'+type.label} disabled={files.busy}
           onClick={() => show({type:'create',ext},type.initialName)}>
@@ -164,7 +165,7 @@ export function FileCenter({ files, onMutate, chooseNew, onChosen }) {
       {!visible.length && <p className="files-empty" role="status">{loading ? '正在读取文件…' : filter ? '没有匹配的文件。' : recent ? '新建或打开文件后，可以在这里继续编辑。' : root ? '此文件夹为空。使用上方的入口创建办公文件或文件夹。' : '选择要管理的本地文件夹。'}</p>}
     </div>
     {modal?.type === 'choose-type' && <Dialog title="新建办公文件" onClose={() => setModal(null)}>
-      <div className="action-list">{Object.entries(fileTypes).map(([ext,type]) => {
+      <div className="action-list">{newFileTypes.map(([ext,type]) => {
         const Icon = icons[ext]
         return <button key={ext} onClick={()=>show({type:'create',ext},type.initialName)}><Icon size={16}/>{type.label}</button>
       })}</div></Dialog>}

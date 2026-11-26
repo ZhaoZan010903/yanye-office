@@ -19,6 +19,18 @@ export async function writeAtomically(filename, text) {
   }
 }
 
+// A renderer can submit another edit while the storage process is reporting
+// dirty disk bindings. Only close against a stable file queue and revision.
+export async function settleWorkspaceForClose(library, store, flush) {
+  for (;;) {
+    const fileQueue = library.idle()
+    await fileQueue
+    await flush()
+    const dirty = await store.dirtyFiles()
+    if (!store.hasPending && library.idle() === fileQueue) return dirty
+  }
+}
+
 export class WorkspaceStore {
   #current = null
   #persisted = null

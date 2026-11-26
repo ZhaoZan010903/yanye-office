@@ -9,16 +9,52 @@ export const officeKinds = Object.freeze({
   database: '多维表格',
   canvas: '流程图与白板',
   presentation: '演示文稿',
+  txt: '纯文本',
+  pdf: 'PDF 阅读器',
 })
 const pageKinds = new Set(['note', 'desk', 'journal', 'book', 'inbox', 'collection', ...Object.keys(officeKinds)])
 
 const pageSizes = new WeakMap()
 const encoder = new TextEncoder()
+const jsonBytes = value => encoder.encode(JSON.stringify(value)).length
+
+function withoutTxtStrings(page) {
+  const content = { ...page.content }
+  for (const key of ['text', 'lineMap']) if (typeof content[key] === 'string') content[key] = ''
+  return { ...page, content }
+}
+
+// Adjust the exact serialized UTF-8 quota using the two unchanged code units
+// beside each splice. Those units matter when a new/old UTF-16 pair crosses
+// a boundary (an unpaired surrogate is a six-byte escape in JSON).
+export function cacheTxtPageSize(before, after, delta, textWindow) {
+  if (!pageSizes.has(before)) return
+  let size = pageSizes.get(before) + jsonBytes(withoutTxtStrings(after)) - jsonBytes(withoutTxtStrings(before))
+  for (const key of ['text', 'lineMap']) {
+    const previous = before.content[key] ?? ''
+    const change = delta[key]
+    if (change) {
+      if (key === 'text' && textWindow) {
+        // CodeMirror already has the neighboring code units in its document tree.
+        // Reading a slice from the newly concatenated JS string can flatten 10 MiB.
+        const { left, removed, right } = textWindow
+        size += jsonBytes(left + change.inserted + right) - jsonBytes(left + removed + right)
+        continue
+      }
+      const first = Math.max(0, change.start - 1)
+      const oldEnd = change.start + change.removed
+      const tail = oldEnd < previous.length ? 1 : 0
+      size += jsonBytes(after.content[key].slice(first, change.start + change.inserted.length + tail)) -
+        jsonBytes(previous.slice(first, oldEnd + tail))
+    } else if (delta.unset.includes(key) && typeof previous === 'string') size -= jsonBytes(previous) - 2
+  }
+  pageSizes.set(after, size)
+}
 
 export function workspaceBytes(workspace) {
-  let bytes = encoder.encode(JSON.stringify({ ...workspace, pages: [] })).length + Math.max(0, workspace.pages.length - 1)
+  let bytes = jsonBytes({ ...workspace, pages: [] }) + Math.max(0, workspace.pages.length - 1)
   for (const page of workspace.pages) {
-    if (!pageSizes.has(page)) pageSizes.set(page, encoder.encode(JSON.stringify(page)).length)
+    if (!pageSizes.has(page)) pageSizes.set(page, jsonBytes(page))
     bytes += pageSizes.get(page)
   }
   return bytes
@@ -187,7 +223,7 @@ export function assertWorkspace(workspace) {
         (Object.hasOwn(officeKinds, page.kind) && (workspace.schemaVersion < 2 || !page.content || typeof page.content !== 'object' || Array.isArray(page.content))) ||
         (page.kind === 'word' && workspace.schemaVersion < 3) ||
         (page.disk != null && (workspace.schemaVersion < 3 || typeof page.disk.id !== 'string' ||
-          typeof page.disk.name !== 'string' || !['docx','xlsx','pptx','md'].includes(page.disk.extension) ||
+          typeof page.disk.name !== 'string' || !['docx','xlsx','pptx','md','pdf','txt'].includes(page.disk.extension) ||
           typeof page.disk.revision !== 'string' || typeof page.disk.dirty !== 'boolean')) ||
         typeof page.createdAt !== 'string' || typeof page.updatedAt !== 'string' ||
         !(page.deletedAt === null || typeof page.deletedAt === 'string')) {

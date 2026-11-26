@@ -10,6 +10,8 @@ const editors = {
   database: lazy(() => import('./modules/Database.jsx')),
   canvas: lazy(() => import('./modules/Canvas.jsx')),
   presentation: lazy(() => import('./modules/Slides.jsx')),
+  txt: lazy(() => import('./modules/PlainText.jsx')),
+  pdf: lazy(() => import('./modules/PdfReader.jsx')),
 }
 
 class OfficeContentBoundary extends React.Component {
@@ -57,7 +59,7 @@ export function OfficePage({ page, pages, focusTitle, saveState, onSave, onEdit,
     <div className="office-editor">
       <OfficeContentBoundary page={page}>
       <Suspense fallback={<p role="status">正在打开{officeKinds[page.kind]}…</p>}>
-        <Editor value={page.content} title={page.title} onChange={content => onEdit({ content })}
+        <Editor value={page.content} title={page.title} disk={page.disk} onChange={content => onEdit({ content })}
           sourcePages={page.kind === 'presentation' ? pages.filter(item => !officeKinds[item.kind]) : undefined}
           onImport={window.yanye.importFile} onExport={window.yanye.exportFile} onPrintPdf={window.yanye.printPdf} />
       </Suspense>

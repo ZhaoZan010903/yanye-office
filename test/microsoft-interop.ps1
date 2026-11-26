@@ -14,6 +14,8 @@ try {
       $sheet.Name = '预算'
       $sheet.Range('A1').Formula = '=3'
       $sheet.Range('B1').Formula = '=A1*2'
+      $sheet.Range('B1').VerticalAlignment = -4160
+      $sheet.Range('B1').Font.Underline = 2
       $book.SaveAs((Join-Path $workDir 'source.xlsx'),51)
     } finally { $book.Close($false) }
   } finally { $excel.Quit() }
@@ -40,6 +42,9 @@ try {
     try {
       $sheet = $book.Worksheets.Item(1)
       if ($sheet.Range('B1').Formula -ne '=A1*2' -or $sheet.Range('B1').Value2 -ne 24) { throw 'Excel 重算核对失败。' }
+      $cell = $sheet.Range('B1')
+      if ($cell.NumberFormat -ne '0.00E+00' -or $cell.Font.Name -ne 'Cambria' -or !$cell.Font.Strikethrough -or $cell.Font.Underline -ne 2 -or $cell.VerticalAlignment -ne -4108) { throw 'Excel 字体或数字格式核对失败。' }
+      foreach ($side in 7..10) { if ($cell.Borders.Item($side).LineStyle -ne 1) { throw 'Excel 单元格框线核对失败。' } }
     } finally { $book.Close($false) }
   } finally { $excel.Quit() }
 

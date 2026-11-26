@@ -110,10 +110,9 @@ try {
   const lastEdit = '# 关闭前的编辑\n\n立即关闭窗口也应该保存这段文字。\n'
   await source().fill(lastEdit)
   await close()
-  const data = JSON.parse(await readFile(join(profile, 'workspace.json'), 'utf8'))
-  assert.equal(data.pages.find(page => page.id === data.activeId).markdown, lastEdit)
-
   page = await start()
+  const data = await page.evaluate(async () => (await window.yanye.load()).workspace)
+  assert.equal(data.pages.find(page => page.id === data.activeId).markdown, lastEdit)
   assert.equal(await title().inputValue(), '导入样本')
   await body().getByRole('heading', { name: '关闭前的编辑' }).waitFor()
   await exerciseOffice(page, application, temp)

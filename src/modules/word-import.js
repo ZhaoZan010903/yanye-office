@@ -1,4 +1,4 @@
-import { defaultLayout, maxImageBytes, validColor, validFont, wordValue } from './word-model.js'
+import { defaultLayout, highlights, maxImageBytes, validColor, validFont, wordValue } from './word-model.js'
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -16,10 +16,20 @@ function inlineMarks(pr) {
     if (flag(child(pr,tag))) marks.push({type})
   }
   const fontEl = child(pr,'rFonts')
-  const font = attr(fontEl,'eastAsia') || attr(fontEl,'ascii') || attr(fontEl,'hAnsi')
+  const font = attr(fontEl,'eastAsia')
+  const latinFont = attr(fontEl,'ascii') || attr(fontEl,'hAnsi')
   const size = bounded(Number(val(child(pr,'sz')))/2,4,400,null)
   const color = '#' + (val(child(pr,'color')) ?? '')
-  if (validFont(font) || size || validColor(color)) marks.push({type:'wordStyle',attrs:{font:validFont(font)?font:null,size,color:validColor(color)?color:null}})
+  const highlight = val(child(pr,'highlight'))
+  const script = val(child(pr,'vertAlign'))
+  const attrs = {}
+  if (validFont(font)) attrs.font = font
+  if (validFont(latinFont) && latinFont !== font) attrs.latinFont = latinFont
+  if (size) attrs.size = size
+  if (validColor(color)) attrs.color = color
+  if (Object.hasOwn(highlights,highlight)) attrs.highlight = highlight
+  if (script === 'subscript' || script === 'superscript') attrs.script = script
+  if (Object.keys(attrs).length) marks.push({type:'wordStyle',attrs})
   return marks
 }
 
@@ -120,7 +130,13 @@ export async function readDocx(base64) {
     const pr=child(p,'pPr'), style=val(child(pr,'pStyle')) || ''
     const level=headings.get(style) || Number(/^Heading([1-6])$/i.exec(style)?.[1])
     const align=val(child(pr,'jc')), spacing=child(pr,'spacing')
-    const attrs={}
+    const attrs={}, indent=child(pr,'ind')
+    for (const [el, property, key, divisor] of [[spacing,'before','spaceBefore',20],[spacing,'after','spaceAfter',20],
+      [indent,'left','leftIndent',20],[indent,'firstLine','firstLinePt',20],[indent,'hanging','firstLinePt',-20],
+      [indent,'firstLineChars','firstLineChars',100],[indent,'hangingChars','firstLineChars',-100]]) {
+      const text = attr(el,property)
+      if (text != null && /^-?\d+$/.test(text)) attrs[key] = Number(text) / divisor
+    }
     if (level) attrs.level=level
     if (['left','right','center','both','justify'].includes(align)) attrs.align=align==='both'?'justify':align
     if (spacing && (attr(spacing,'lineRule') || 'auto')==='auto' && attr(spacing,'line')) attrs.lineSpacing=bounded(Number(attr(spacing,'line'))/240,0.5,5,1.25)

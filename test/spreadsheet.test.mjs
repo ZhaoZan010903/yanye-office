@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  address, bounds, changeCellStyle, copyRange, csvText, delimitedText, emptyWorkbook, evaluator, fillFrom, formatted, location, mergeRange, newSheet, parseDelimited, pasteRange, unmergeRange,
+  address, bounds, changeBorders, changeCellStyle, copyRange, csvText, delimitedText, emptyWorkbook, evaluator, fillFrom, formatted, location, mergeRange, newSheet, parseDelimited, pasteRange, unmergeRange,
   removeSheet, renameSheet, shiftGrid, writeRange,
 } from '../src/modules/spreadsheet.js'
 import { appendSheets, readXlsx, writeXlsx } from '../src/modules/spreadsheet-xlsx.js'
@@ -73,6 +73,27 @@ test('formulas recalculate dependencies, quoted sheets, ranges and cycle errors'
   assert.equal(renamed.sheets[0].cells.A1,"=SUM('项目成本'!$B$1:B3)")
 })
 
+test('选区框线作用于显示行，装饰、对齐和数字格式通过 XLSX 保留', async () => {
+  const book=emptyWorkbook()
+  let sheet=changeCellStyle(book.sheets[0],[0,2],0,2,{vertical:'top',underline:'double',strike:true,numberFormat:'groupedDecimal'})
+  sheet=changeBorders(sheet,[0,2],0,2,'outline')
+  assert.deepEqual(Object.keys(sheet.styles.A1.borders).sort(),['left','top'])
+  assert.deepEqual(Object.keys(sheet.styles.B3.borders),['bottom'])
+  assert.equal(sheet.styles.B2,undefined)
+  const all=changeBorders(sheet,[2],1,1,'all')
+  assert.equal(Object.keys(all.styles.B3.borders).length,4)
+  assert.equal(changeBorders(all,[2],1,1,'none').styles.B3.borders,undefined)
+  book.sheets[0]=sheet
+  const [restored]=await readXlsx(await writeXlsx(book))
+  assert.equal(restored.styles.A1.borders.left.style,'thin')
+  assert.equal(restored.styles.A1.underline,'double')
+  assert.equal(restored.styles.A1.strike,true)
+  assert.equal(restored.styles.A1.vertical,'top')
+  assert.equal(restored.formats.A1,'groupedDecimal')
+  assert.equal(formatted(12345.678,'groupedDecimal'),'12,345.68')
+  assert.equal(formatted(0.00341,'scientific'),'3.41E-03')
+})
+
 test('structural edits preserve references, range endpoints, other sheet names and absolute addresses', () => {
   const book = emptyWorkbook(), sheet = book.sheets[0]
   sheet.cells = { A1:'2', A2:'3', A3:'4', C4:'=SUM($A$1:A3)', D4:'=A1' }
@@ -106,7 +127,8 @@ test('fill updates relative references and keeps absolute cells and number forma
   assert.equal(copied.cells.B2,'=$A1+$B$1')
   assert.equal(copied.formats.B2,'percent')
   assert.equal(fillFrom(copied,2,1,'down').cells.B3,'=$A2+$B$1')
-  assert.equal(formatted(0.45,'percent'),'45%')
+  assert.equal(formatted(0.45,'percent'),'45.00%')
+  assert.equal(formatted(0.45,'percentWhole'),'45%')
   assert.equal(removeSheet(book,sheet.id).sheets[0].cells.A1,'=#REF!')
 })
 

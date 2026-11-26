@@ -20,6 +20,14 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
   const lock = useRef(false)
   const [busy, setBusy] = useState(false)
   const [epoch, setEpoch] = useState(0)
+  const [encodingRequest, setEncodingRequest] = useState(null)
+
+  function chooseEncoding(bytes, name) {
+    return new Promise(resolve => setEncodingRequest({ bytes, name, finish(encoding) {
+      setEncodingRequest(null)
+      resolve(encoding)
+    } }))
+  }
 
   async function run(work) {
     if (lock.current) return false
@@ -40,7 +48,7 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
       const file = await load()
       if (!file) return false
       const type = fileTypes[file.extension]
-      if (!type) throw new Error('当前可直接编辑 DOCX、XLSX、PPTX 和 Markdown 文件。')
+      if (!type) throw new Error('此格式尚未提供编辑器。')
       const ws = latest.current
       const byId = indexPages(ws.pages)
       const existing = ws.pages.find(p => p.disk?.id === file.id && isVisible(p, byId))
@@ -51,10 +59,11 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
         reveal(existing.id)
         if (revisionChanged) notify('磁盘文件已更改。当前显示保留的草稿，可另存为独立文件。')
       } else {
-        const data = await readOfficeFile(file)
+        const data = await readOfficeFile(file, chooseEncoding)
+        if (!data) return false
         if (data.markdown?.length > MAX_MARKDOWN_LENGTH) throw new Error('Markdown 文件超过单页字符上限。')
         const page = existing ?? makePage({ title, kind: type.kind })
-        const fields = { ...data, title, disk: binding(file, file.extension !== 'md') }
+        const fields = { ...data, title, disk: binding(file, ['docx','xlsx','pptx'].includes(file.extension)) }
         const ok = change(current => {
           if (!existing) return addPage(releaseOtherBindings(current,page.id,file.id), { ...page, ...fields })
           const now = current.pages.find(p=>p.id===page.id)
@@ -90,6 +99,19 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
   function saveFile(id, asNew = false, confirmed = false) {
     const page = latest.current?.pages.find(p => p.id === id)
     if (!page) return Promise.resolve(false)
+    if (page.kind === 'pdf') {
+      if (!asNew || !page.disk) { notify('PDF 阅读器保留原件。'); return Promise.resolve(true) }
+      return run(async () => {
+        const copy = await api.copyPdf(page.disk.id, page.disk.revision)
+        if (!copy) return false
+        change(current => updatePage(releaseOtherBindings(current,id,copy.id), id, {
+          disk:binding(copy), title:fileTitle(copy.name,'pdf').slice(0,MAX_TITLE_LENGTH),
+        }))
+        setEpoch(n => n + 1)
+        notify('已保存 ' + copy.name)
+        return true
+      })
+    }
     if (page.disk?.confirmOverwrite && page.disk.dirty && !asNew && !confirmed) {
       prompt({ type: 'confirm-write', id })
       return Promise.resolve(false)
@@ -97,15 +119,23 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     return run(async () => {
       if (page.disk && !page.disk.dirty && !asNew) { notify('当前文件已保存。'); return true }
       const extension = pageExtension(page)
+      const convertText = extension === 'txt' && page.content?.encoding === 'gb18030'
       const content = await writeOfficeFile(page)
-      const file = await api.save({ id: page.disk?.id, revision: page.disk?.revision, asNew,
-        name: (page.title.trim() || fileTypes[extension].initialName) + '.' + extension, extension, content })
+      const name = (page.title.trim() || fileTypes[extension].initialName) + (convertText ? '-UTF8' : '') + '.' + extension
+      const file = await api.save({ id: page.disk?.id, revision: page.disk?.revision, asNew:asNew || convertText,
+        preserveSource:convertText, name, extension, content })
       if (!file) return false
+      if (!page.disk) {
+        setEpoch(n => n + 1)
+        notify('已导出 ' + file.name)
+        return true
+      }
       change(current => {
         const now = current.pages.find(p => p.id === id)
         if (!now) return current
         const dirty = now.content !== page.content || now.markdown !== page.markdown
         return updatePage(releaseOtherBindings(current,id,file.id), id, { disk: { ...binding(file), dirty },
+          ...(convertText ? { content:{ ...now.content, encoding:'utf-8', bom:false } } : {}),
           title: fileTitle(file.name, extension).slice(0, MAX_TITLE_LENGTH) })
       })
       setEpoch(n => n + 1)
@@ -114,5 +144,5 @@ export function useDiskFiles({ latest, change, reveal, prompt, notify }) {
     })
   }
 
-  return { busy, epoch, openFile, createFile, saveFile }
+  return { busy, epoch, openFile, createFile, saveFile, encodingRequest }
 }

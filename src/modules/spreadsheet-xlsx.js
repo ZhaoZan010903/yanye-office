@@ -1,7 +1,7 @@
-import { bounds, evaluator, isNumberText, LIMITS, location, newSheet, rangeName, renameReferences, validName } from './spreadsheet.js'
+import { bounds, evaluator, isNumberText, LIMITS, location, newSheet, numberFormats, rangeName, renameReferences, validName } from './spreadsheet.js'
 
-export const exchangeNote = 'XLSX 保留值、公式、常用数字格式、字体字号、加粗、斜体、RGB 字色和填充、水平对齐、合并区域、行高列宽及首行首列冻结。日期转为文本。图片、图表、宏与复杂样式超出当前转换范围。CSV 导出当前表的计算结果。'
-const numberFormats = { number:'0.00', currency:'"¥"#,##0.00', percent:'0.00%' }
+export const exchangeNote = 'XLSX 保留值、公式、常用数字格式、字体字号、加粗、斜体、下划线、删除线、RGB 字色和填充、边框、水平与垂直对齐、合并区域、行高列宽及首行首列冻结。日期转为文本。图片、图表、宏与复杂样式超出当前转换范围。CSV 导出当前表的计算结果。'
+const formatByCode = new Map(Object.entries(numberFormats).map(([key,[,code]])=>[code,key]))
 
 export function availableName(proposed, sheets) {
   let base = proposed.replace(/[\\/?*\[\]:\x00-\x1f]/g,' ').trim().replace(/^'+|'+$/g,'').slice(0,31) || '工作表'
@@ -101,17 +101,20 @@ export async function readXlsx(base64) {
       const style = {}
       if (cell.font?.bold) style.bold = true
       if (cell.font?.italic) style.italic = true
+      if (cell.font?.underline) style.underline = cell.font.underline === true ? 'single' : cell.font.underline
+      if (cell.font?.strike) style.strike = true
       if (cell.font?.name) style.font = cell.font.name
       if (cell.font?.size) style.size = cell.font.size
       if (rgb(cell.font?.color)) style.color = rgb(cell.font.color)
       if (cell.fill?.pattern === 'solid' && rgb(cell.fill.fgColor)) style.fill = rgb(cell.fill.fgColor)
       if (['left','center','right'].includes(cell.alignment?.horizontal)) style.align = cell.alignment.horizontal
+      if (['top','middle','bottom'].includes(cell.alignment?.vertical)) style.vertical = cell.alignment.vertical
+      if (cell.border && Object.values(cell.border).some(side=>side?.style)) style.borders = cell.border
       if (Object.keys(style).length) (sheet.styles ??= {})[ref] = style
       const format = String(cell.numFmt ?? '')
-      let numFmt
-      if (/%/.test(format)) numFmt = 'percent'
-      else if (/[¥￥]/.test(format)) numFmt = 'currency'
-      else if (format === '0.00' || format === '#,##0.00') numFmt = 'number'
+      let numFmt = formatByCode.get(format)
+      if (!numFmt && /%/.test(format)) numFmt = 'percent'
+      else if (!numFmt && /[¥￥]/.test(format)) numFmt = 'currency'
       if (numFmt) (sheet.formats ??= {})[ref] = numFmt
       const value = cell.value
       if (value === null || value === undefined) continue
@@ -147,19 +150,22 @@ export async function writeXlsx(book) {
       } else cell.value = raw.startsWith("'") ? raw.slice(1) : isNumberText(raw) ? Number(raw) : raw
     }
     for (const [ref,style] of Object.entries(sheet.formats ?? {})) {
-      if (Object.hasOwn(numberFormats,style)) ws.getCell(ref).numFmt = numberFormats[style]
+      if (Object.hasOwn(numberFormats,style)) ws.getCell(ref).numFmt = numberFormats[style][1]
     }
     for (const [ref,style] of Object.entries(sheet.styles ?? {})) {
       const cell = ws.getCell(ref)
       if (cell.isMerged && cell.master.address !== ref) continue
-      if (style.bold || style.italic || style.color || style.font || style.size) cell.font = {
+      if (style.bold || style.italic || style.underline || style.strike || style.color || style.font || style.size) cell.font = {
         bold: Boolean(style.bold), italic: Boolean(style.italic),
+        ...(style.underline ? {underline:style.underline} : {}),
+        ...(style.strike ? {strike:true} : {}),
         ...(style.color ? { color: { argb:argb(style.color) } } : {}),
         ...(style.font ? {name:style.font} : {}),
         ...(style.size ? {size:style.size} : {}),
       }
       if (style.fill) cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:argb(style.fill)}}
-      if (style.align) cell.alignment = {horizontal:style.align}
+      if (style.align || style.vertical) cell.alignment = {...(style.align ? {horizontal:style.align} : {}),...(style.vertical ? {vertical:style.vertical} : {})}
+      if (style.borders) cell.border = style.borders
     }
   }
   const bytes = new Uint8Array(await workbook.xlsx.writeBuffer())

@@ -1,0 +1,648 @@
+{
+  "version": "0.5.0",
+  "asarSha256": "1058263f497f2b373c24b7339d8310bd8ad73521a25cc6698900a5cf927d7d2e",
+  "executable": "YanYe.exe",
+  "machine": {
+    "os": "win32 10.0.26300 x64",
+    "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "memoryGiB": 15.8
+  },
+  "fixtures": {
+    "md": {
+      "bytes": 1048576,
+      "sha256": "bbb93b945293f124ba7cb473c14107a28f3d891fc39ab6853c9371bbf05bcb6d",
+      "encoding": "UTF-8",
+      "eol": "LF",
+      "headingLevels": 3,
+      "headings": 509,
+      "codeBlocks": 508
+    },
+    "pptx": {
+      "bytes": 7614503,
+      "sha256": "1d7c6a49ec97e029590b755863c0b09d9000340b5e186d8d76dab5fbcee6697c",
+      "slides": 30,
+      "distinctImages": 20,
+      "imageSize": [
+        600,
+        360
+      ],
+      "notes": 30,
+      "positionedTextBoxes": 30
+    }
+  },
+  "timing": "From trusted click or keydown to the frame after visible editable content (and the current decoded slide image). Alternate open order, fresh offline process/profile per round, seven cached forward switches per process.",
+  "verification": "Read each saved PPTX archive, compare all 30 titles, notes and transforms, resolve per-page image relationships and compare all 20 PNG hashes. Compare saved Markdown with source plus the single intentional UTF-8 append byte-for-byte.",
+  "requestedRounds": 30,
+  "warmup": {
+    "round": 0,
+    "cachedNext": [
+      24,
+      28,
+      30,
+      30,
+      30,
+      28,
+      29
+    ],
+    "pptxOpen": 1087,
+    "mdOpen": 297,
+    "mdOpenMode": "virtual-source",
+    "mdEnd": 21,
+    "mdInput": 29,
+    "mdRichSwitch": 9965
+  },
+  "unit": "ms",
+  "samples": [
+    {
+      "round": 1,
+      "cachedNext": [
+        34,
+        30,
+        29,
+        30,
+        30,
+        28,
+        25
+      ],
+      "mdOpen": 439,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 19,
+      "mdInput": 28,
+      "mdRichSwitch": 10951,
+      "pptxOpen": 1309
+    },
+    {
+      "round": 2,
+      "cachedNext": [
+        23,
+        27,
+        29,
+        27,
+        29,
+        29,
+        29
+      ],
+      "pptxOpen": 1414,
+      "mdOpen": 354,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 24,
+      "mdInput": 33,
+      "mdRichSwitch": 14772
+    },
+    {
+      "round": 3,
+      "cachedNext": [
+        25,
+        30,
+        30,
+        30,
+        30,
+        30,
+        31
+      ],
+      "mdOpen": 366,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 22,
+      "mdInput": 32,
+      "mdRichSwitch": 17064,
+      "pptxOpen": 1585
+    },
+    {
+      "round": 4,
+      "cachedNext": [
+        23,
+        30,
+        30,
+        31,
+        31,
+        31,
+        29
+      ],
+      "pptxOpen": 1657,
+      "mdOpen": 464,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 34,
+      "mdInput": 34,
+      "mdRichSwitch": 18303
+    },
+    {
+      "round": 5,
+      "cachedNext": [
+        24,
+        30,
+        31,
+        30,
+        31,
+        31,
+        31
+      ],
+      "mdOpen": 306,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 24,
+      "mdInput": 31,
+      "mdRichSwitch": 20136,
+      "pptxOpen": 1553
+    },
+    {
+      "round": 6,
+      "cachedNext": [
+        21,
+        29,
+        30,
+        29,
+        30,
+        30,
+        29
+      ],
+      "pptxOpen": 1439,
+      "mdOpen": 350,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 20,
+      "mdInput": 29,
+      "mdRichSwitch": 13073
+    },
+    {
+      "round": 7,
+      "cachedNext": [
+        20,
+        31,
+        30,
+        31,
+        31,
+        30,
+        30
+      ],
+      "mdOpen": 384,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 31,
+      "mdInput": 32,
+      "mdRichSwitch": 13638,
+      "pptxOpen": 1436
+    },
+    {
+      "round": 8,
+      "cachedNext": [
+        22,
+        29,
+        29,
+        28,
+        29,
+        30,
+        29
+      ],
+      "pptxOpen": 1457,
+      "mdOpen": 367,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 21,
+      "mdInput": 29,
+      "mdRichSwitch": 16965
+    },
+    {
+      "round": 9,
+      "cachedNext": [
+        19,
+        30,
+        28,
+        30,
+        29,
+        28,
+        28
+      ],
+      "mdOpen": 313,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 20,
+      "mdInput": 24,
+      "mdRichSwitch": 16468,
+      "pptxOpen": 1672
+    },
+    {
+      "round": 10,
+      "cachedNext": [
+        20,
+        30,
+        29,
+        30,
+        30,
+        30,
+        27
+      ],
+      "pptxOpen": 1483,
+      "mdOpen": 353,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 29,
+      "mdInput": 32,
+      "mdRichSwitch": 21653
+    },
+    {
+      "round": 11,
+      "cachedNext": [
+        27,
+        28,
+        29,
+        30,
+        30,
+        30,
+        25
+      ],
+      "mdOpen": 299,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 34,
+      "mdInput": 29,
+      "mdRichSwitch": 10163,
+      "pptxOpen": 1158
+    },
+    {
+      "round": 12,
+      "cachedNext": [
+        25,
+        29,
+        31,
+        30,
+        30,
+        29,
+        28
+      ],
+      "pptxOpen": 1423,
+      "mdOpen": 324,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 22,
+      "mdInput": 31,
+      "mdRichSwitch": 10533
+    },
+    {
+      "round": 13,
+      "cachedNext": [
+        22,
+        30,
+        27,
+        30,
+        30,
+        30,
+        28
+      ],
+      "mdOpen": 342,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 31,
+      "mdInput": 27,
+      "mdRichSwitch": 10304,
+      "pptxOpen": 1157
+    },
+    {
+      "round": 14,
+      "cachedNext": [
+        25,
+        30,
+        30,
+        29,
+        31,
+        30,
+        30
+      ],
+      "pptxOpen": 1308,
+      "mdOpen": 346,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 27,
+      "mdInput": 31,
+      "mdRichSwitch": 10430
+    },
+    {
+      "round": 15,
+      "cachedNext": [
+        22,
+        30,
+        31,
+        31,
+        29,
+        30,
+        28
+      ],
+      "mdOpen": 352,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 35,
+      "mdInput": 26,
+      "mdRichSwitch": 10235,
+      "pptxOpen": 1286
+    },
+    {
+      "round": 16,
+      "cachedNext": [
+        24,
+        29,
+        30,
+        30,
+        29,
+        29,
+        28
+      ],
+      "pptxOpen": 1348,
+      "mdOpen": 291,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 21,
+      "mdInput": 32,
+      "mdRichSwitch": 9960
+    },
+    {
+      "round": 17,
+      "cachedNext": [
+        23,
+        31,
+        31,
+        32,
+        29,
+        30,
+        27
+      ],
+      "mdOpen": 349,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 28,
+      "mdInput": 30,
+      "mdRichSwitch": 10068,
+      "pptxOpen": 1176
+    },
+    {
+      "round": 18,
+      "cachedNext": [
+        25,
+        29,
+        29,
+        29,
+        29,
+        30,
+        26
+      ],
+      "pptxOpen": 1411,
+      "mdOpen": 299,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 20,
+      "mdInput": 31,
+      "mdRichSwitch": 9963
+    },
+    {
+      "round": 19,
+      "cachedNext": [
+        26,
+        29,
+        30,
+        30,
+        31,
+        29,
+        29
+      ],
+      "mdOpen": 344,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 21,
+      "mdInput": 27,
+      "mdRichSwitch": 10316,
+      "pptxOpen": 1198
+    },
+    {
+      "round": 20,
+      "cachedNext": [
+        21,
+        30,
+        30,
+        30,
+        30,
+        29,
+        27
+      ],
+      "pptxOpen": 1297,
+      "mdOpen": 373,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 21,
+      "mdInput": 30,
+      "mdRichSwitch": 10466
+    },
+    {
+      "round": 21,
+      "cachedNext": [
+        23,
+        29,
+        28,
+        29,
+        30,
+        30,
+        30
+      ],
+      "mdOpen": 348,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 32,
+      "mdInput": 28,
+      "mdRichSwitch": 10377,
+      "pptxOpen": 1206
+    },
+    {
+      "round": 22,
+      "cachedNext": [
+        27,
+        30,
+        30,
+        31,
+        30,
+        30,
+        29
+      ],
+      "pptxOpen": 1326,
+      "mdOpen": 316,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 25,
+      "mdInput": 31,
+      "mdRichSwitch": 9892
+    },
+    {
+      "round": 23,
+      "cachedNext": [
+        27,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "mdOpen": 346,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 22,
+      "mdInput": 30,
+      "mdRichSwitch": 10155,
+      "pptxOpen": 1175
+    },
+    {
+      "round": 24,
+      "cachedNext": [
+        20,
+        30,
+        30,
+        30,
+        30,
+        29,
+        26
+      ],
+      "pptxOpen": 1311,
+      "mdOpen": 286,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 25,
+      "mdInput": 31,
+      "mdRichSwitch": 9877
+    },
+    {
+      "round": 25,
+      "cachedNext": [
+        26,
+        31,
+        31,
+        30,
+        29,
+        30,
+        31
+      ],
+      "mdOpen": 340,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 34,
+      "mdInput": 30,
+      "mdRichSwitch": 10378,
+      "pptxOpen": 1126
+    },
+    {
+      "round": 26,
+      "cachedNext": [
+        21,
+        29,
+        29,
+        31,
+        30,
+        30,
+        29
+      ],
+      "pptxOpen": 1357,
+      "mdOpen": 311,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 22,
+      "mdInput": 30,
+      "mdRichSwitch": 10392
+    },
+    {
+      "round": 27,
+      "cachedNext": [
+        26,
+        31,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "mdOpen": 333,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 28,
+      "mdInput": 31,
+      "mdRichSwitch": 10301,
+      "pptxOpen": 1185
+    },
+    {
+      "round": 28,
+      "cachedNext": [
+        33,
+        30,
+        31,
+        30,
+        30,
+        31,
+        31
+      ],
+      "pptxOpen": 1370,
+      "mdOpen": 331,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 23,
+      "mdInput": 31,
+      "mdRichSwitch": 10034
+    },
+    {
+      "round": 29,
+      "cachedNext": [
+        21,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "mdOpen": 338,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 20,
+      "mdInput": 29,
+      "mdRichSwitch": 10092,
+      "pptxOpen": 1121
+    },
+    {
+      "round": 30,
+      "cachedNext": [
+        29,
+        29,
+        30,
+        30,
+        30,
+        30,
+        31
+      ],
+      "pptxOpen": 1364,
+      "mdOpen": 311,
+      "mdOpenMode": "virtual-source",
+      "mdEnd": 33,
+      "mdInput": 30,
+      "mdRichSwitch": 9789
+    }
+  ],
+  "failures": [],
+  "summary": {
+    "pptxOpen": {
+      "n": 30,
+      "p50": 1326,
+      "p95": 1657,
+      "max": 1672,
+      "limit": 2500,
+      "pass": true
+    },
+    "mdOpen": {
+      "n": 30,
+      "p50": 342,
+      "p95": 439,
+      "max": 464,
+      "limit": 1000,
+      "pass": true
+    },
+    "cachedNext": {
+      "n": 210,
+      "p50": 30,
+      "p95": 31,
+      "max": 34,
+      "limit": 100,
+      "pass": true
+    },
+    "mdRichSwitch": {
+      "n": 30,
+      "p50": 10377,
+      "p95": 20136,
+      "max": 21653,
+      "limit": null,
+      "pass": null
+    },
+    "mdEnd": {
+      "n": 30,
+      "p50": 24,
+      "p95": 34,
+      "max": 35,
+      "limit": null,
+      "pass": null
+    },
+    "mdInput": {
+      "n": 30,
+      "p50": 30,
+      "p95": 33,
+      "max": 34,
+      "limit": null,
+      "pass": null
+    }
+  }
+}

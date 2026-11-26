@@ -57,6 +57,8 @@ Windows x64 便携版产品版本为 0.5.0。打包后的 `app.asar` SHA-256 为
 
 ## 复验
 
+本次本机交付的 `YanYe-0.5.0-win32-x64.zip` 为 164,413,862 字节。归档内 73 份文件已与测试目录逐一核对 SHA-256。整个 ZIP 的 SHA-256 为 `e2322e997120d98c371527b57287f26ed509c9686fc916ee122e1ecb33fa614a`。重新构建时归档时间戳可能不同。
+
 在仓库根目录运行 `pnpm test`、`pnpm package:win`，然后执行下列命令。桌面脚本使用隔离工作区和生成的本地样本。原应用回读脚本需要在已安装相应办公套件的 Windows 上执行。
 
 ```powershell
@@ -68,6 +70,7 @@ node test/word-desktop.mjs $exe
 node test/spreadsheet-desktop.mjs $exe
 .\test\workbook-native-rules.ps1
 .\test\presentation-native.ps1 -Executable $exe
+node test/presentation-markdown-performance.mjs $exe 30 presentation-markdown.json
 ```
 
 原版式替换测试逐一比较 DOCX、XLSX 和 PPTX 的所有 ZIP 成员，核对只有目标文字部件发生变化，同时检查磁盘原件、未支持的附加部件、公式和域显示值。性能的样本规模、计时口径和构建摘要见[性能记录](PERFORMANCE.md)。

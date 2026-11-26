@@ -1,0 +1,262 @@
+{
+  "version": "0.5.0",
+  "asarSha256": "1058263f497f2b373c24b7339d8310bd8ad73521a25cc6698900a5cf927d7d2e",
+  "executable": "YanYe.exe",
+  "machine": {
+    "os": "win32 10.0.26300 x64",
+    "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "memoryGiB": 15.8
+  },
+  "fixtures": {
+    "docx": {
+      "bytes": 5166,
+      "sha256": "98710bbe12ce0f1ff88097b599bb3596116df3d84c1b61706af5872f18425a8a"
+    },
+    "xlsx": {
+      "bytes": 125723,
+      "sha256": "f5d24181b45b900ea335b59c62dfbae62ceacdd298c9cd3bc2886c6cd2d134b7"
+    }
+  },
+  "rounds": 30,
+  "summary": {
+    "docxOpenMs": {
+      "p50": 393,
+      "p95": 433,
+      "max": 440
+    },
+    "docxSaveMs": {
+      "p50": 334,
+      "p95": 351,
+      "max": 351
+    },
+    "xlsxOpenMs": {
+      "p50": 942,
+      "p95": 1042,
+      "max": 1082
+    },
+    "xlsxSaveMs": {
+      "p50": 383,
+      "p95": 406,
+      "max": 422
+    }
+  },
+  "warmup": {
+    "round": 0,
+    "docxOpenMs": 404,
+    "docxSaveMs": 336,
+    "xlsxOpenMs": 907,
+    "xlsxSaveMs": 389
+  },
+  "samples": [
+    {
+      "round": 1,
+      "xlsxOpenMs": 924,
+      "xlsxSaveMs": 376,
+      "docxOpenMs": 385,
+      "docxSaveMs": 323
+    },
+    {
+      "round": 2,
+      "docxOpenMs": 393,
+      "docxSaveMs": 345,
+      "xlsxOpenMs": 893,
+      "xlsxSaveMs": 381
+    },
+    {
+      "round": 3,
+      "xlsxOpenMs": 942,
+      "xlsxSaveMs": 394,
+      "docxOpenMs": 375,
+      "docxSaveMs": 333
+    },
+    {
+      "round": 4,
+      "docxOpenMs": 409,
+      "docxSaveMs": 234,
+      "xlsxOpenMs": 903,
+      "xlsxSaveMs": 384
+    },
+    {
+      "round": 5,
+      "xlsxOpenMs": 1082,
+      "xlsxSaveMs": 403,
+      "docxOpenMs": 405,
+      "docxSaveMs": 336
+    },
+    {
+      "round": 6,
+      "docxOpenMs": 440,
+      "docxSaveMs": 332,
+      "xlsxOpenMs": 943,
+      "xlsxSaveMs": 385
+    },
+    {
+      "round": 7,
+      "xlsxOpenMs": 1028,
+      "xlsxSaveMs": 369,
+      "docxOpenMs": 376,
+      "docxSaveMs": 337
+    },
+    {
+      "round": 8,
+      "docxOpenMs": 404,
+      "docxSaveMs": 332,
+      "xlsxOpenMs": 890,
+      "xlsxSaveMs": 369
+    },
+    {
+      "round": 9,
+      "xlsxOpenMs": 1042,
+      "xlsxSaveMs": 390,
+      "docxOpenMs": 393,
+      "docxSaveMs": 333
+    },
+    {
+      "round": 10,
+      "docxOpenMs": 395,
+      "docxSaveMs": 233,
+      "xlsxOpenMs": 998,
+      "xlsxSaveMs": 397
+    },
+    {
+      "round": 11,
+      "xlsxOpenMs": 1037,
+      "xlsxSaveMs": 400,
+      "docxOpenMs": 393,
+      "docxSaveMs": 221
+    },
+    {
+      "round": 12,
+      "docxOpenMs": 433,
+      "docxSaveMs": 234,
+      "xlsxOpenMs": 889,
+      "xlsxSaveMs": 319
+    },
+    {
+      "round": 13,
+      "xlsxOpenMs": 1008,
+      "xlsxSaveMs": 364,
+      "docxOpenMs": 392,
+      "docxSaveMs": 335
+    },
+    {
+      "round": 14,
+      "docxOpenMs": 408,
+      "docxSaveMs": 333,
+      "xlsxOpenMs": 889,
+      "xlsxSaveMs": 387
+    },
+    {
+      "round": 15,
+      "xlsxOpenMs": 978,
+      "xlsxSaveMs": 422,
+      "docxOpenMs": 387,
+      "docxSaveMs": 222
+    },
+    {
+      "round": 16,
+      "docxOpenMs": 425,
+      "docxSaveMs": 317,
+      "xlsxOpenMs": 931,
+      "xlsxSaveMs": 400
+    },
+    {
+      "round": 17,
+      "xlsxOpenMs": 1021,
+      "xlsxSaveMs": 363,
+      "docxOpenMs": 375,
+      "docxSaveMs": 336
+    },
+    {
+      "round": 18,
+      "docxOpenMs": 387,
+      "docxSaveMs": 318,
+      "xlsxOpenMs": 904,
+      "xlsxSaveMs": 383
+    },
+    {
+      "round": 19,
+      "xlsxOpenMs": 1041,
+      "xlsxSaveMs": 379,
+      "docxOpenMs": 393,
+      "docxSaveMs": 345
+    },
+    {
+      "round": 20,
+      "docxOpenMs": 406,
+      "docxSaveMs": 341,
+      "xlsxOpenMs": 905,
+      "xlsxSaveMs": 399
+    },
+    {
+      "round": 21,
+      "xlsxOpenMs": 1027,
+      "xlsxSaveMs": 344,
+      "docxOpenMs": 376,
+      "docxSaveMs": 351
+    },
+    {
+      "round": 22,
+      "docxOpenMs": 406,
+      "docxSaveMs": 334,
+      "xlsxOpenMs": 922,
+      "xlsxSaveMs": 380
+    },
+    {
+      "round": 23,
+      "xlsxOpenMs": 994,
+      "xlsxSaveMs": 394,
+      "docxOpenMs": 392,
+      "docxSaveMs": 351
+    },
+    {
+      "round": 24,
+      "docxOpenMs": 414,
+      "docxSaveMs": 334,
+      "xlsxOpenMs": 889,
+      "xlsxSaveMs": 373
+    },
+    {
+      "round": 25,
+      "xlsxOpenMs": 1022,
+      "xlsxSaveMs": 382,
+      "docxOpenMs": 358,
+      "docxSaveMs": 347
+    },
+    {
+      "round": 26,
+      "docxOpenMs": 379,
+      "docxSaveMs": 340,
+      "xlsxOpenMs": 876,
+      "xlsxSaveMs": 406
+    },
+    {
+      "round": 27,
+      "xlsxOpenMs": 1022,
+      "xlsxSaveMs": 352,
+      "docxOpenMs": 374,
+      "docxSaveMs": 335
+    },
+    {
+      "round": 28,
+      "docxOpenMs": 431,
+      "docxSaveMs": 336,
+      "xlsxOpenMs": 887,
+      "xlsxSaveMs": 395
+    },
+    {
+      "round": 29,
+      "xlsxOpenMs": 976,
+      "xlsxSaveMs": 398,
+      "docxOpenMs": 393,
+      "docxSaveMs": 338
+    },
+    {
+      "round": 30,
+      "docxOpenMs": 414,
+      "docxSaveMs": 335,
+      "xlsxOpenMs": 915,
+      "xlsxSaveMs": 332
+    }
+  ]
+}

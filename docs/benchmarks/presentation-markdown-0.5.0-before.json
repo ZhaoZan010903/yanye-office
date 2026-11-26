@@ -1,0 +1,145 @@
+{
+  "version": "0.5.0",
+  "asarSha256": "18bb01c25ad8a60c719037e42c201d989180493a495ef7d15fc1bf5587d8b66f",
+  "executable": "YanYe.exe",
+  "machine": {
+    "os": "win32 10.0.26300 x64",
+    "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "memoryGiB": 15.8
+  },
+  "fixtures": {
+    "md": {
+      "bytes": 1048576,
+      "sha256": "bbb93b945293f124ba7cb473c14107a28f3d891fc39ab6853c9371bbf05bcb6d",
+      "encoding": "UTF-8",
+      "eol": "LF",
+      "headingLevels": 3,
+      "headings": 509,
+      "codeBlocks": 508
+    },
+    "pptx": {
+      "bytes": 7614503,
+      "sha256": "1d7c6a49ec97e029590b755863c0b09d9000340b5e186d8d76dab5fbcee6697c",
+      "slides": 30,
+      "distinctImages": 20,
+      "imageSize": [
+        600,
+        360
+      ],
+      "notes": 30,
+      "positionedTextBoxes": 30
+    }
+  },
+  "timing": "From trusted click or keydown to the frame after visible editable content (and the current decoded slide image); fresh offline process and profile, alternating open order.",
+  "status": "Stopped during the fifth measured round to implement the large Markdown opening change. Only the four finished measured rounds are listed; this is a diagnostic baseline.",
+  "intermediateSourceTextarea": {
+    "asarSha256": "fb063192a5809f4a6316533088b6e2941e9679d44e27f40bf6132fa1878ac249",
+    "status": "Same fixture bytes and renderer-event timing. Stopped after two completed measured rounds to replace the large native textarea with a virtualized editor.",
+    "warmup": {"round":0,"pptxOpen":1117,"cachedNext":[27,29,30,31,31,30,30],"mdOpen":1438,"mdOpenMode":"source","mdEnd":27,"mdInput":1964,"mdRichSwitch":8393},
+    "samples": [
+      {"round":1,"pptxOpen":1322,"cachedNext":[25,29,29,30,29,30,30],"mdOpen":982,"mdOpenMode":"source","mdEnd":37,"mdInput":2175,"mdRichSwitch":8803},
+      {"round":2,"pptxOpen":1577,"cachedNext":[18,29,30,30,29,30,29],"mdOpen":1074,"mdOpenMode":"source","mdEnd":32,"mdInput":2069,"mdRichSwitch":9673}
+    ]
+  },
+  "warmup": {
+    "round": 0,
+    "cachedNext": [
+      24,
+      30,
+      30,
+      30,
+      29,
+      28,
+      28
+    ],
+    "pptxOpen": 1104,
+    "mdOpen": 7066,
+    "mdOpenMode": "rich"
+  },
+  "unit": "ms",
+  "samples": [
+    {
+      "round": 1,
+      "cachedNext": [
+        27,
+        29,
+        30,
+        31,
+        30,
+        28,
+        29
+      ],
+      "mdOpen": 9774,
+      "pptxOpen": 1306,
+      "mdOpenMode": "rich"
+    },
+    {
+      "round": 2,
+      "cachedNext": [
+        29,
+        28,
+        30,
+        28,
+        29,
+        30,
+        28
+      ],
+      "pptxOpen": 1504,
+      "mdOpen": 12345,
+      "mdOpenMode": "rich"
+    },
+    {
+      "round": 3,
+      "cachedNext": [
+        24,
+        30,
+        30,
+        30,
+        31,
+        30,
+        30
+      ],
+      "mdOpen": 8897,
+      "pptxOpen": 1775,
+      "mdOpenMode": "rich"
+    },
+    {
+      "round": 4,
+      "cachedNext": [
+        25,
+        27,
+        31,
+        29,
+        29,
+        30,
+        30
+      ],
+      "pptxOpen": 1349,
+      "mdOpen": 16140,
+      "mdOpenMode": "rich"
+    }
+  ],
+  "summary": {
+    "pptxOpen": {
+      "n": 4,
+      "p50": 1349,
+      "p95": 1775,
+      "max": 1775,
+      "limit": 2500
+    },
+    "mdOpen": {
+      "n": 4,
+      "p50": 9774,
+      "p95": 16140,
+      "max": 16140,
+      "limit": 1000
+    },
+    "cachedNext": {
+      "n": 28,
+      "p50": 29,
+      "p95": 31,
+      "max": 31,
+      "limit": 100
+    }
+  }
+}
